@@ -1,1 +1,13 @@
-
+{
+  "name": "backend-bot",
+  "version": "1.0.0",
+  "main": "bot.js",
+  "scripts": {
+    "start": "node bot.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "firebase-admin": "^12.0.0",
+    "node-telegram-bot-api": "^0.65.0"
+  }
+}
