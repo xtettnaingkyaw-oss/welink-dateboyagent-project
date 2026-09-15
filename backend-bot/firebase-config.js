@@ -1,7 +1,8 @@
 const admin = require("firebase-admin");
-const serviceAccount = require("./serviceAccountKey.json");
 
-// Firebase Admin ကို Initialize လုပ်ခြင်း
+// JSON ဖိုင်ကို တိုက်ရိုက်မခေါ်တော့ဘဲ Environment Variable ကနေ လှမ်းယူပါမည်
+const serviceAccount = JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT);
+
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount)
 });
