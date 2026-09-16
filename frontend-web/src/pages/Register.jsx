@@ -6,6 +6,9 @@ import { CheckCircle, UploadCloud } from 'lucide-react';
 
 export default function Register() {
   const [formData, setFormData] = useState({ name: '', age: '', phone: '', city: '', township: '', height: '', address: '' });
+  const [customCity, setCustomCity] = useState('');
+  const [customTownship, setCustomTownship] = useState('');
+  
   const [locations, setLocations] = useState([]);
   const [publicPhoto, setPublicPhoto] = useState('');
   const [privatePhotos, setPrivatePhotos] = useState('');
@@ -22,10 +25,18 @@ export default function Register() {
     fetchLocations();
   }, []);
 
-  const cities = [...new Set(locations.map(l => l.city))];
-  const townships = locations.filter(l => l.city === formData.city).map(l => l.township);
+  // Admin လက်ခံထားသော မြို့နယ်များကိုသာ စစ်ထုတ်ခြင်း
+  const activeLocations = locations.filter(l => l.status !== 'pending');
+  const cities = [...new Set(activeLocations.map(l => l.city))];
+  const townships = activeLocations.filter(l => l.city === formData.city).map(l => l.township);
 
-  const handleChange = (e) => setFormData({ ...formData, [e.target.name]: e.target.value });
+  const handleChange = (e) => {
+    setFormData({ ...formData, [e.target.name]: e.target.value });
+    if (e.target.name === 'city') {
+      setFormData(prev => ({ ...prev, township: '' })); // မြို့ပြောင်းလျှင် မြို့နယ်ကို Reset လုပ်မည်
+      setCustomTownship('');
+    }
+  };
 
   const handleImageUpload = async (e, setPhotoState) => {
     const file = e.target.files[0];
@@ -40,76 +51,112 @@ export default function Register() {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!formData.city || !formData.township) return alert('မြို့ နှင့် မြို့နယ်ကို ရွေးချယ်ပေးပါ။');
     if (!agreeTerms || !agreePrivacy) return alert('Terms and Conditions များကို သဘောတူညီရန် လိုအပ်ပါသည်။');
+    
+    // အတည်ပြုမည့် မြို့ နှင့် မြို့နယ်
+    let finalCity = formData.city === 'other' ? customCity : formData.city;
+    let finalTownship = (formData.city === 'other' || formData.township === 'other') ? customTownship : formData.township;
+
+    if (!finalCity || !finalTownship) return alert('မြို့ နှင့် မြို့နယ်ကို ပြည့်စုံစွာ ထည့်သွင်းပေးပါ။');
+
     setIsSubmitting(true);
     try {
-      await addDoc(collection(db, 'dateboys'), { ...formData, publicPhoto, privatePhotos, status: 'pending', createdAt: serverTimestamp() });
+      // မြို့နယ်အသစ် ရိုက်ထည့်ထားပါက Admin ထံသို့ Request ပို့မည်
+      if (formData.city === 'other' || formData.township === 'other') {
+        const isExist = locations.find(l => l.city === finalCity && l.township === finalTownship);
+        if (!isExist) {
+          await addDoc(collection(db, 'locations'), { city: finalCity, township: finalTownship, status: 'pending' });
+        }
+      }
+
+      await addDoc(collection(db, 'dateboys'), { 
+        ...formData, city: finalCity, township: finalTownship, 
+        publicPhoto, privatePhotos, status: 'pending', createdAt: serverTimestamp() 
+      });
       setIsSuccess(true);
     } catch (error) { alert('အမှားအယွင်းဖြစ်ပေါ်နေပါသည်။'); } 
     finally { setIsSubmitting(false); }
   };
 
-  if (isSuccess) return ( /* အောင်မြင်ကြောင်း စာမျက်နှာ အတူတူပင် */
+  if (isSuccess) return (
     <div className="flex flex-col items-center justify-center pt-24 text-center px-4 animate-in fade-in zoom-in duration-500">
-      <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6"><CheckCircle className="text-green-500 w-12 h-12" /></div>
-      <h2 className="text-3xl font-black text-gray-800 mb-3">အောင်မြင်ပါသည်!</h2>
-      <p className="text-gray-500 max-w-sm">သင့်အချက်အလက်များကို ရရှိပြီးပါပြီ။</p>
+      <div className="w-24 h-24 bg-green-100 rounded-full flex items-center justify-center mb-6 shadow-lg shadow-green-500/20"><CheckCircle className="text-green-500 w-12 h-12" /></div>
+      <h2 className="text-3xl font-black text-gray-800 mb-3 tracking-tight">အောင်မြင်ပါသည်!</h2>
+      <p className="text-gray-500 max-w-sm leading-relaxed">သင့်အချက်အလက်များကို ရရှိပြီးပါပြီ။ Admin မှ စစ်ဆေးပြီးပါက အကြောင်းပြန်ပေးပါမည်။</p>
     </div>
   );
 
   return (
     <div className="max-w-2xl mx-auto p-4 sm:p-6 lg:p-8 animate-in slide-in-from-bottom-4 fade-in duration-500">
-      <div className="bg-white rounded-[2rem] shadow-sm border border-gray-100 overflow-hidden">
-        <div className="bg-gradient-to-r from-orange-400 via-yellow-400 to-green-400 p-8 text-center">
-          <h2 className="text-3xl font-black text-white drop-shadow-sm">Date Boy လျှောက်လွှာ</h2>
+      <div className="bg-white rounded-[2rem] shadow-[0_8px_30px_rgb(0,0,0,0.04)] border border-gray-100 overflow-hidden">
+        <div className="bg-gradient-to-r from-orange-400 via-yellow-400 to-green-400 p-8 text-center relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-32 h-32 bg-white/20 rounded-full blur-2xl -mr-10 -mt-10"></div>
+          <h2 className="text-3xl font-black text-white drop-shadow-sm relative z-10">Date Boy လျှောက်လွှာ</h2>
         </div>
+        
         <form onSubmit={handleSubmit} className="p-6 sm:p-10 space-y-6">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
-            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2">အမည်</label><input type="text" name="name" required placeholder="သင့်အမည်" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none" /></div>
-            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2">အသက်</label><input type="number" name="age" required placeholder="၂၅" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none" /></div>
-            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2">အရပ်အမြင့်</label><input type="text" name="height" required placeholder="5' 9&quot;" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none" /></div>
-            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2">ဖုန်းနံပါတ်</label><input type="tel" name="phone" required placeholder="09xxxxxxxxx" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none" /></div>
+            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2 ml-1">အမည်</label><input type="text" name="name" required placeholder="သင့်အမည်" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50/50 border-2 border-gray-100 focus:border-blue-400 focus:bg-white outline-none transition-all" /></div>
+            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2 ml-1">အသက်</label><input type="number" name="age" required placeholder="ဥပမာ - ၂၅" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50/50 border-2 border-gray-100 focus:border-blue-400 focus:bg-white outline-none transition-all" /></div>
+            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2 ml-1">အရပ်အမြင့်</label><input type="text" name="height" required placeholder="ဥပမာ - 5' 9&quot;" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50/50 border-2 border-gray-100 focus:border-blue-400 focus:bg-white outline-none transition-all" /></div>
+            <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2 ml-1">ဖုန်းနံပါတ်</label><input type="tel" name="phone" required placeholder="09xxxxxxxxx" onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50/50 border-2 border-gray-100 focus:border-blue-400 focus:bg-white outline-none transition-all" /></div>
           </div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 bg-blue-50/30 p-5 rounded-3xl border border-blue-50">
+            {/* 📍 မြို့ ရွေးချယ်ရန် 📍 */}
             <div className="relative group">
-              <label className="block text-xs font-bold text-gray-500 mb-2">မြို့ ရွေးချယ်ရန်</label>
-              <select name="city" required value={formData.city} onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none appearance-none">
+              <label className="block text-xs font-bold text-blue-600 mb-2 ml-1">မြို့ ရွေးချယ်ရန်</label>
+              <select name="city" required value={formData.city} onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-white border-2 border-blue-100 focus:border-blue-400 outline-none appearance-none cursor-pointer">
                 <option value="">-- မြို့ရွေးပါ --</option>
                 {cities.map(c => <option key={c} value={c}>{c}</option>)}
+                <option value="other" className="text-blue-600 font-bold bg-blue-50">➕ အခြား (မြို့အမည် အသစ်ထည့်မည်)</option>
               </select>
+              {formData.city === 'other' && (
+                <input type="text" placeholder="မြို့အမည် အသစ်ရိုက်ထည့်ပါ..." required value={customCity} onChange={e=>setCustomCity(e.target.value)} className="w-full px-5 py-4 mt-3 rounded-2xl bg-white border-2 border-orange-200 focus:border-orange-400 outline-none animate-in fade-in" />
+              )}
             </div>
+
+            {/* 📍 မြို့နယ် ရွေးချယ်ရန် 📍 */}
             <div className="relative group">
-              <label className="block text-xs font-bold text-gray-500 mb-2">မြို့နယ် ရွေးချယ်ရန်</label>
-              <select name="township" required value={formData.township} onChange={handleChange} disabled={!formData.city} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none appearance-none disabled:opacity-50">
-                <option value="">{formData.city ? '-- မြို့နယ်ရွေးပါ --' : 'အရင်ဆုံး မြို့ကိုရွေးပါ'}</option>
-                {townships.map(t => <option key={t} value={t}>{t}</option>)}
-              </select>
+              <label className="block text-xs font-bold text-blue-600 mb-2 ml-1">မြို့နယ် ရွေးချယ်ရန်</label>
+              {formData.city === 'other' ? (
+                <input type="text" placeholder="မြို့နယ်အမည် အသစ်ရိုက်ထည့်ပါ..." required value={customTownship} onChange={e=>setCustomTownship(e.target.value)} className="w-full px-5 py-4 rounded-2xl bg-white border-2 border-orange-200 focus:border-orange-400 outline-none" />
+              ) : (
+                <>
+                  <select name="township" required value={formData.township} onChange={handleChange} disabled={!formData.city} className="w-full px-5 py-4 rounded-2xl bg-white border-2 border-blue-100 focus:border-blue-400 outline-none appearance-none cursor-pointer disabled:opacity-50">
+                    <option value="">{formData.city ? '-- မြို့နယ်ရွေးပါ --' : 'အရင်ဆုံး မြို့ကိုရွေးပါ'}</option>
+                    {townships.map(t => <option key={t} value={t}>{t}</option>)}
+                    {formData.city && <option value="other" className="text-blue-600 font-bold bg-blue-50">➕ အခြား (မြို့နယ်အသစ်ထည့်မည်)</option>}
+                  </select>
+                  {formData.township === 'other' && (
+                    <input type="text" placeholder="မြို့နယ်အမည် အသစ်ရိုက်ထည့်ပါ..." required value={customTownship} onChange={e=>setCustomTownship(e.target.value)} className="w-full px-5 py-4 mt-3 rounded-2xl bg-white border-2 border-orange-200 focus:border-orange-400 outline-none animate-in fade-in" />
+                  )}
+                </>
+              )}
             </div>
           </div>
           
-          <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2">လိပ်စာအပြည့်အစုံ</label><input type="text" name="address" required placeholder="အမှတ်၊ လမ်း၊ ရပ်ကွက်..." onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50 border border-gray-200 focus:bg-white focus:border-blue-400 outline-none" /></div>
+          <div className="relative group"><label className="block text-xs font-bold text-gray-500 mb-2 ml-1">လိပ်စာအပြည့်အစုံ</label><input type="text" name="address" required placeholder="အမှတ်၊ လမ်း၊ ရပ်ကွက်..." onChange={handleChange} className="w-full px-5 py-4 rounded-2xl bg-gray-50/50 border-2 border-gray-100 focus:border-blue-400 focus:bg-white outline-none transition-all" /></div>
 
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-4">
-            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:bg-blue-50 cursor-pointer">
-              <UploadCloud className="w-8 h-8 text-blue-400 mx-auto mb-3" />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2">
+            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:bg-blue-50 cursor-pointer transition-colors group">
+              <UploadCloud className="w-8 h-8 text-blue-400 mx-auto mb-3 group-hover:scale-110 transition-transform" />
               <label className="block text-sm font-bold text-gray-700 cursor-pointer">Public ပုံ ရွေးရန်<input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, setPublicPhoto)} className="hidden" /></label>
               {publicPhoto && <span className="text-xs text-green-500 font-bold mt-2 block">✓ ရွေးပြီးပါပြီ</span>}
             </div>
-            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:bg-purple-50 cursor-pointer">
-              <UploadCloud className="w-8 h-8 text-purple-400 mx-auto mb-3" />
+            <div className="border-2 border-dashed border-gray-200 rounded-2xl p-6 text-center hover:bg-purple-50 cursor-pointer transition-colors group">
+              <UploadCloud className="w-8 h-8 text-purple-400 mx-auto mb-3 group-hover:scale-110 transition-transform" />
               <label className="block text-sm font-bold text-gray-700 cursor-pointer">Private ပုံများ ရွေးရန်<input type="file" accept="image/*" onChange={(e) => handleImageUpload(e, setPrivatePhotos)} className="hidden" /></label>
               {privatePhotos && <span className="text-xs text-green-500 font-bold mt-2 block">✓ ရွေးပြီးပါပြီ</span>}
             </div>
           </div>
 
-          <div className="bg-orange-50/50 rounded-2xl p-5 space-y-3">
-            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" required onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-1" /><span className="text-sm text-gray-600">Terms and Conditions များကို သဘောတူပါသည်။</span></label>
-            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" required onChange={(e) => setAgreePrivacy(e.target.checked)} className="mt-1" /><span className="text-sm text-gray-600">Data Privacy Policy အရ အသုံးပြုခွင့်ပေးပါသည်။</span></label>
+          <div className="bg-orange-50/50 rounded-2xl p-5 space-y-3 border border-orange-100/50">
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" required onChange={(e) => setAgreeTerms(e.target.checked)} className="mt-1" /><span className="text-sm text-gray-600">Date Boy များအတွက် သတ်မှတ်ထားသော Terms and Conditions များကို သဘောတူပါသည်။</span></label>
+            <label className="flex items-start gap-3 cursor-pointer"><input type="checkbox" required onChange={(e) => setAgreePrivacy(e.target.checked)} className="mt-1" /><span className="text-sm text-gray-600">ကျွန်ုပ်၏ အချက်အလက်များကို Data Privacy Policy အရ အသုံးပြုခွင့်ပေးပါသည်။</span></label>
           </div>
 
-          <button type="submit" disabled={isSubmitting} className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-black py-4 rounded-2xl shadow-lg hover:shadow-xl disabled:opacity-50 transition-all text-lg">
+          <button type="submit" disabled={isSubmitting} className="w-full bg-gradient-to-r from-blue-600 to-purple-600 text-white font-black py-4 rounded-2xl shadow-lg hover:shadow-xl hover:-translate-y-1 disabled:opacity-50 transition-all duration-300 text-lg">
             {isSubmitting ? 'ပေးပို့နေပါသည်...' : 'စာရင်းသွင်းမည်'}
           </button>
         </form>
