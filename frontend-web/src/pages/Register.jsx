@@ -82,7 +82,7 @@ export default function Register() {
           
           <div className="mt-2">
             <label className="block text-sm text-gray-600 mb-1">Public ပုံ (၁) ပုံ တင်ရန်</label>
-            <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'publicPhoto')} required className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
+            <input type="file" accept="image/*" onChange={(e) => handlePhotoUpload(e, 'publicPhoto')} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100" />
           </div>
         </div>
 
