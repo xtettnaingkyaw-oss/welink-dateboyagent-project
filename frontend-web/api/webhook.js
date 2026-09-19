@@ -32,39 +32,6 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
-// 📸 Web App မှလာသော Base64 ပုံများကို ကျော်ဖြတ်ရန် Helper Function
-async function sendDateBoyCard(chatId, boy, boyId) {
-  const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
-  const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
-  const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n🍆 *Size:* ${boy.cockSize || 'N/A'}\n📍 *နေရာ:* ${boy.township}, ${boy.city}`;
-  
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }],
-      [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]
-    ]
-  };
-
-  let sentPhoto = false;
-  // ပုံရှိပြီး Telegram Link (Base64 မဟုတ်လျှင်) ပုံဖြင့်ပို့မည်
-  if (pPhotos.length > 0 && !pPhotos[0].startsWith('data:image')) {
-    try {
-      const res = await fetch(`${TELEGRAM_API}/sendPhoto`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ chat_id: chatId, photo: pPhotos[0], caption, parse_mode: 'Markdown', reply_markup: keyboard })
-      });
-      const data = await res.json();
-      if (data.ok) sentPhoto = true;
-    } catch(e) { console.error('Photo send error', e); }
-  }
-
-  // Base64 ဖြစ်နေလျှင် သို့မဟုတ် ပုံပို့၍မအောင်မြင်လျှင် Text ဖြင့်သာ ခလုတ်တွဲပို့မည် (Error မတက်စေရန်)
-  if (!sentPhoto) {
-    await sendMessage(chatId, caption, keyboard);
-  }
-}
-
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
@@ -110,13 +77,22 @@ export default async function handler(req, res) {
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
 
       if (action === 'APP_P') {
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private ပုံများဖြစ်ပါသည်-`);
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
-        for (const url of prPhotos) {
-          if (!url.startsWith('data:image')) {
-            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: url }) });
-          }
+        
+        let validLinks = [];
+        for (let i = 0; i < prPhotos.length; i++) {
+          if (prPhotos[i].startsWith('http')) validLinks.push(`[Private ပုံ ${i+1}](${prPhotos[i]})`);
         }
+        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 *Private ဓာတ်ပုံများ:* ${validLinks.join(' | ')}` : "";
+
+        const nextActionKeyboard = {
+          inline_keyboard: [
+            [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }],
+            [{ text: "🔄 အစမှ ပြန်ရွေးမည်", callback_data: "ROLE_CLIENT" }]
+          ]
+        };
+
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private ပုံများဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ *${boyCode}* ၏ Private ပုံများကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ *${boyCode}* ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -253,6 +229,7 @@ export default async function handler(req, res) {
         const applicantData = currentState.data;
         const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
 
+        // ⚠️ ဤနေရာတွင် မြို့နယ်အသစ် ရှိ/မရှိ စစ်ဆေးပြီး မရှိပါက Pending သို့ ပို့ပေးမည် ⚠️
         const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
         const locSnap = await getDocs(locQuery);
         if (locSnap.empty) {
@@ -302,7 +279,6 @@ export default async function handler(req, res) {
       const townships = [...new Set(snap.docs.map(d => d.data().township))];
       
       const keyboard = townships.map(t => [{ text: `📍 ${t}`, callback_data: `TOWNSHIP_${t}` }]);
-      
       // 🌐 မြို့နယ်အားလုံးပြရန် ခလုတ် ထည့်သွင်းခြင်း
       keyboard.unshift([{ text: "🌐 မြို့နယ်အားလုံးပြရန်", callback_data: `TOWNSHIP_ALL_${selectedCity}` }]);
 
@@ -324,14 +300,34 @@ export default async function handler(req, res) {
       }
 
       const snap = await getDocs(q);
-      
+
       if (snap.empty) {
         await sendMessage(chatId, `⚠️ ဤနေရာတွင် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားနေရာ ပြောင်းရှာပါ။`);
       } else {
         await sendMessage(chatId, `✨ *${titleMsg}* တွင် ရရှိနိုင်သော Date Boy (${snap.size} ယောက်):`);
+        
         for (const dDoc of snap.docs) {
-          // Helper Function ကို အသုံးပြု၍ ပြသခြင်း
-          await sendDateBoyCard(chatId, dDoc.data(), dDoc.id);
+          const boy = dDoc.data();
+          const boyId = dDoc.id;
+          const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+          const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
+          
+          let validLinks = [];
+          for (let i = 0; i < pPhotos.length; i++) {
+            if (pPhotos[i].startsWith('http')) validLinks.push(`[Public ပုံ ${i+1}](${pPhotos[i]})`);
+          }
+          let publicLinksText = validLinks.length > 0 ? `\n\n📸 *Public ပုံများ:* ${validLinks.join(' | ')}` : "";
+
+          const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n🍆 *Size:* ${boy.cockSize || 'N/A'}\n📍 *နေရာ:* ${boy.township}, ${boy.city}${publicLinksText}`;
+          
+          const keyboard = {
+            inline_keyboard: [
+              [{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }],
+              [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]
+            ]
+          };
+
+          await sendMessage(chatId, caption, keyboard);
         }
         await sendMessage(chatId, "🔄 ထပ်မံရှာဖွေလိုပါက /start ကို နှိပ်ပါ။");
       }
