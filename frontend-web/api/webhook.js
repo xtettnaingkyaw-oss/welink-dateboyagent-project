@@ -15,8 +15,6 @@ const db = getFirestore(app);
 
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
-// ⚠️ သတိပြုရန် - သင်၏ Telegram ကို Admin အဖြစ် သတ်မှတ်ရန် အောက်ပါ /setadmin command ကို သုံးပါ ⚠️
-// Admin ID ကို Database ထဲမှ ယူရန်
 async function getAdminChatId() {
   const adminDoc = await getDoc(doc(db, 'settings', 'admin_config'));
   if (adminDoc.exists()) {
@@ -43,9 +41,7 @@ async function getTelegramFileUrl(fileId) {
   try {
     const res = await fetch(`${TELEGRAM_API}/getFile?file_id=${fileId}`);
     const data = await res.json();
-    if (data.ok) {
-      return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${data.result.file_path}`;
-    }
+    if (data.ok) return `https://api.telegram.org/file/bot${process.env.TELEGRAM_BOT_TOKEN}/${data.result.file_path}`;
   } catch (e) {
     console.error('Error getting file URL:', e);
   }
@@ -54,9 +50,7 @@ async function getTelegramFileUrl(fileId) {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST') {
-      return res.status(200).json({ status: 'Bot Server is running!' });
-    }
+    if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
 
     const { message, callback_query } = req.body;
     let chatId, text, username, photos = [];
@@ -65,8 +59,6 @@ export default async function handler(req, res) {
       chatId = message.chat.id;
       text = message.text ? message.text.trim() : '';
       username = message.from.username || message.from.first_name;
-      
-      // ပုံပို့လာလျှင် အကောင်းဆုံး Quality ကို ယူမည်
       if (message.photo && message.photo.length > 0) {
         const bestPhoto = message.photo[message.photo.length - 1];
         const fileUrl = await getTelegramFileUrl(bestPhoto.file_id);
@@ -80,18 +72,15 @@ export default async function handler(req, res) {
 
     if (!chatId) return res.status(200).json({ status: 'No chatId' });
 
-    // 👨‍💻 သင်ကိုယ်တိုင် Admin အဖြစ် သတ်မှတ်ရန် (Telegram တွင် /setadmin ဟု ရိုက်ပို့ပါ) 👨‍💻
     if (text === '/setadmin') {
       await setDoc(doc(db, 'settings', 'admin_config'), { chatId: chatId });
-      await sendMessage(chatId, "✅ ဤအကောင့်ကို Admin အဖြစ် အောင်မြင်စွာ သတ်မှတ်ပြီးပါပြီ။ လျှောက်လွှာအသစ်များကို ဤနေရာသို့ ပေးပို့ပါမည်။");
+      await sendMessage(chatId, "✅ ဤအကောင့်ကို Admin အဖြစ် အောင်မြင်စွာ သတ်မှတ်ပြီးပါပြီ။");
       return res.status(200).json({ status: 'success' });
     }
 
-    // /start ဖြင့် အစပြန်စရန်
     if (text === '/start' || text === 'RESET') {
       const stateRef = doc(db, 'telegram_states', String(chatId));
       await setDoc(stateRef, { step: 'CHOOSING_ROLE', data: {} });
-      
       await sendMessage(chatId, "✨ *WE LINK Dating Agency* မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
         inline_keyboard: [
           [{ text: "🔍 Date Boy ရှာမည် (Client)", callback_data: "ROLE_CLIENT" }],
@@ -105,15 +94,11 @@ export default async function handler(req, res) {
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
-    // -----------------------------------------------------
-    // 1️⃣ ရွေးချယ်မှု အဆင့် (CHOOSING ROLE)
-    // -----------------------------------------------------
     if (currentState.step === 'CHOOSING_ROLE') {
       if (text === 'ROLE_CLIENT') {
         const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
         const snap = await getDocs(q);
         const townships = [...new Set(snap.docs.map(d => d.data().township))];
-
         if (townships.length === 0) {
           await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။ /start ဖြင့် အစမှ ပြန်စပါ။");
           await setDoc(stateRef, { step: 'IDLE', data: {} });
@@ -131,59 +116,46 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
-    // -----------------------------------------------------
-    // 2️⃣ Date Boy လျှောက်ထားခြင်း (Data Collection)
-    // -----------------------------------------------------
     if (currentState.step === 'APPLICANT_RULES' && text === 'AGREE_RULES') {
       await setDoc(stateRef, { step: 'GET_NAME', data: {} });
       await sendMessage(chatId, "✍️ ကျေးဇူးပြု၍ သင့်ရဲ့ *အမည်* ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_NAME' && text) {
       await setDoc(stateRef, { step: 'GET_AGE', data: { ...currentState.data, name: text } });
       await sendMessage(chatId, "🎂 ကျေးဇူးပြု၍ သင့်ရဲ့ *အသက်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ၂၅):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_AGE' && text) {
       await setDoc(stateRef, { step: 'GET_HEIGHT', data: { ...currentState.data, age: text } });
       await sendMessage(chatId, "📏 ကျေးဇူးပြု၍ သင့်ရဲ့ *အရပ်အမြင့်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - 5' 9\"):");
       return res.status(200).json({ status: 'success' });
     }
-
-    // သီးသန့် အချက်အလက် တောင်းခံခြင်း (Cock Size)
     if (currentState.step === 'GET_HEIGHT' && text) {
       await setDoc(stateRef, { step: 'GET_COCK_SIZE', data: { ...currentState.data, height: text } });
       await sendMessage(chatId, "🍆 ကျေးဇူးပြု၍ သင့်ရဲ့ *အရွယ်အစား (Cock Size)* ကို လက်မဖြင့် ရိုက်ထည့်ပေးပါ (ဥပမာ - 6\"):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_COCK_SIZE' && text) {
       await setDoc(stateRef, { step: 'GET_PHONE', data: { ...currentState.data, cockSize: text } });
       await sendMessage(chatId, "📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် *ဖုန်းနံပါတ်* ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_PHONE' && text) {
       await setDoc(stateRef, { step: 'GET_CITY', data: { ...currentState.data, phone: text } });
       await sendMessage(chatId, "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ *မြို့* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - မန္တလေး):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_CITY' && text) {
       await setDoc(stateRef, { step: 'GET_TOWNSHIP', data: { ...currentState.data, city: text } });
       await sendMessage(chatId, "📍 ကျေးဇူးပြု၍ နေထိုင်ရာ *မြို့နယ်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ချမ်းအေးသာစံ):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_TOWNSHIP' && text) {
       await setDoc(stateRef, { step: 'GET_ADDRESS', data: { ...currentState.data, township: text } });
       await sendMessage(chatId, "🏠 ကျေးဇူးပြု၍ *နေရပ်လိပ်စာ အသေးစိတ်* ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
-
-    // 📸 ပုံများ တောင်းခံခြင်း (Public 3 ပုံ)
     if (currentState.step === 'GET_ADDRESS' && text) {
       await setDoc(stateRef, { step: 'GET_PUBLIC_PHOTOS', data: { ...currentState.data, address: text, publicPhotos: [] } });
       await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ:");
@@ -206,7 +178,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
-    // 📸 ပုံများ တောင်းခံခြင်း (Private 3 ပုံ) နှင့် Database သို့ ပို့ခြင်း
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
@@ -217,9 +188,19 @@ export default async function handler(req, res) {
       if (currentPrivate.length < 3) {
         await sendMessage(chatId, `🔒 ပစ္စည်းပုံ ${currentPrivate.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
-        // Data အပြည့်အစုံ ရရှိသွားပါပြီ - Database သို့ သိမ်းမည်
         const applicantData = currentState.data;
         const telegramProfileLink = message.from.username ? `https://t.me/${message.from.username}` : `tg://user?id=${chatId}`;
+
+        // ⚠️ ဤနေရာတွင် မြို့နယ်အသစ် ရှိ/မရှိ စစ်ဆေးပြီး မရှိပါက Pending သို့ ပို့ပေးမည် ⚠️
+        const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
+        const locSnap = await getDocs(locQuery);
+        if (locSnap.empty) {
+          await addDoc(collection(db, 'locations'), {
+            city: applicantData.city,
+            township: applicantData.township,
+            status: 'pending' // Admin Settings သို့ တက်လာမည်
+          });
+        }
 
         const finalData = {
           name: applicantData.name,
@@ -238,40 +219,32 @@ export default async function handler(req, res) {
           createdAt: serverTimestamp()
         };
 
-        // Date Boy အဖြစ် Firestore သို့ သိမ်းခြင်း
-        const docRef = await addDoc(collection(db, 'dateboys'), finalData);
+        await addDoc(collection(db, 'dateboys'), finalData);
         
-        // 🔔 Admin ဆီသို့ Notification ပို့ခြင်း
         const adminChatId = await getAdminChatId();
         if (adminChatId) {
-          // ပုံများကို နှိပ်ကြည့်နိုင်သော လင့်ခ်များအဖြစ် ပြောင်းခြင်း
           const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
           const privateLinks = currentPrivate.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
 
           const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n` +
                            `👤 *အမည်:* ${finalData.name}\n` +
                            `🎂 *အသက်:* ${finalData.age} နှစ်\n` +
-                           `📏 *အရပ်:* ${finalData.height}\n` +
-                           `🍆 *Size:* ${finalData.cockSize}\n` +
+                           `📏 *အရပ်:* ${finalData.height} | 🍆 *Size:* ${finalData.cockSize}\n` +
                            `📞 *ဖုန်း:* ${finalData.phone}\n` +
                            `📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n\n` +
-                           `📸 *Public Photos:* ${publicLinks}\n` +
-                           `🔒 *Private Photos:* ${privateLinks}\n\n` +
+                           `📸 *Public:* ${publicLinks}\n` +
+                           `🔒 *Private:* ${privateLinks}\n\n` +
                            `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})\n\n` +
                            `💻 ဓာတ်ပုံများနှင့် အသေးစိတ်ကို *Admin Panel* တွင် ဝင်ရောက်စစ်ဆေးနိုင်ပါသည်။`;
           await sendMessage(adminChatId, adminMsg);
         }
 
-        // လျှောက်ထားသူအား အကြောင်းကြားခြင်း
         await setDoc(stateRef, { step: 'IDLE', data: {} });
         await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏");
       }
       return res.status(200).json({ status: 'success' });
     }
 
-    // -----------------------------------------------------
-    // 3️⃣ Client Flow (ရှာဖွေသူများအတွက်)
-    // -----------------------------------------------------
     if (currentState.step === 'CLIENT_SELECT_TOWNSHIP' && text.startsWith('TOWNSHIP_')) {
       const selectedTownship = text.replace('TOWNSHIP_', '');
       const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'), where('township', '==', selectedTownship));
@@ -281,15 +254,11 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `⚠️ ${selectedTownship} တွင် လောလောဆယ် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားမြို့နယ် ပြောင်းရှာပါ။`);
       } else {
         await sendMessage(chatId, `✨ *${selectedTownship}* တွင် ရရှိနိုင်သော Date Boy များ (${snap.size} ယောက်):`);
-        
         for (const dDoc of snap.docs) {
           const boy = dDoc.data();
           const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
-          
           const caption = `👤 *အမည်:* ${boy.name}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n📍 *လိပ်စာ:* ${boy.township}, ${boy.city}\n📞 *ဖုန်း:* ${boy.phone}\n\n🔒 *Private ပုံများကြည့်ရှုရန်:* ဝန်ဆောင်ခပေးချေရန် Admin သို့ ဆက်သွယ်ပါ။`;
-          
           if (pPhotos.length > 0) {
-            // ပထမဆုံး Public ပုံကို ပြမည်
             await fetch(`${TELEGRAM_API}/sendPhoto`, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
