@@ -13,14 +13,14 @@ async function getAdminChatId() {
 async function getAppConfig() {
   const cDoc = await getDoc(doc(db, 'settings', 'app_config'));
   return cDoc.exists() ? cDoc.data() : { 
-    paymentInfo: 'Admin ကိုဆက်သွယ်ပါ', privFee: 5000, feeSec: 30000, feeDay: 70000, feeNight: 100000, 
-    clientIdFee: 10000, // 👈 အသစ်ထည့်သွင်းထားသော Client ID ကြေး
+    paymentInfo: 'Admin ကိုဆက်သွယ်ပါ', privFee: 5000, feeSec: 30000, feeDay: 70000, feeNight: 100000, clientIdFee: 10000,
     reqText: '၁။ အသက် ၂၁ နှစ်ပြည့်ပြီးသူ ဖြစ်ရပါမည်။', ruleText: '၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရပါမည်။' 
   };
 }
 
+// 📱 Menu တွင် "Date Boy လျှောက်မည်" အား ပြောင်းလဲထည့်သွင်းထားသည်
 const MAIN_MENU_KEYBOARD = {
-  keyboard: [[{ text: "🔄 အစသို့ ပြန်သွားမည်" }, { text: "🔍 Date Boy ထပ်ရှာမည်" }], [{ text: "📞 Admin သို့ ဆက်သွယ်ရန်" }]],
+  keyboard: [[{ text: "🔄 အစသို့ ပြန်သွားမည်" }, { text: "🔍 Date Boy ထပ်ရှာမည်" }], [{ text: "💼 Date Boy လျှောက်မည်" }]],
   resize_keyboard: true, is_persistent: true
 };
 
@@ -98,14 +98,44 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
+    const adminChatId = await getAdminChatId();
+
+    // 🔍 Admin မှ Date Boy ကို ID ဖြင့် ရှာဖွေခြင်း (ဥပမာ- WLDB-ABCDE)
+    if (text.toUpperCase().startsWith('WLDB-')) {
+      if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
+        await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
+        return res.status(200).json({ status: 'ok' });
+      }
+      
+      const searchCode = text.toUpperCase();
+      const snap = await getDocs(collection(db, 'dateboys'));
+      let foundBoy = null;
+      let foundBoyId = null;
+      
+      snap.forEach(d => {
+        const code = `WLDB-${d.id.substring(0, 5).toUpperCase()}`;
+        if (code === searchCode) {
+          foundBoy = d.data();
+          foundBoyId = d.id;
+        }
+      });
+
+      if (foundBoy) {
+        await sendMessage(chatId, `🔍 စနစ်အတွင်းမှ ရှာဖွေတွေ့ရှိပါသည် -`);
+        await sendDateBoyCard(chatId, foundBoy, foundBoyId);
+      } else {
+        await sendMessage(chatId, `❌ *${searchCode}* အား စနစ်အတွင်း ရှာမတွေ့ပါ။`);
+      }
+      return res.status(200).json({ status: 'ok' });
+    }
+
     // --- Admin Approvals ---
     if (text.startsWith('APP_') || text.startsWith('REJ_')) {
       const parts = text.split('_');
-      const action = parts[0] + '_' + parts[1]; // APP_P, REJ_P, APP_H, REJ_H, APP_D, REJ_D, APP_C, REJ_C
+      const action = parts[0] + '_' + parts[1];
       const clientChatId = parts[2];
-      const boyId = parts[3]; // For Client ID, this is just 'X'
+      const boyId = parts[3];
 
-      // 🔐 Client ID Approval Logic
       if (action === 'APP_C') {
         const newClientId = `WLC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
         await setDoc(doc(db, 'client_ids', newClientId), {
@@ -122,7 +152,6 @@ export default async function handler(req, res) {
         return res.status(200).json({ status: 'ok' });
       }
 
-      // ဓာတ်ပုံ၊ Date Boy Booking နှင့် လျှောက်လွှာ အတည်ပြုခြင်း
       const boySnap = await getDoc(doc(db, 'dateboys', boyId));
       if (!boySnap.exists()) return res.status(200).json({ status: 'not found' });
       const boy = boySnap.data();
@@ -153,7 +182,8 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === 'APP_D') {
         await updateDoc(doc(db, 'dateboys', boyId), { status: 'approved' });
-        await sendMessage(clientChatId, `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။`, MAIN_MENU_KEYBOARD);
+        // 🔔 Date Boy လျှောက်လွှာ အတည်ပြုကြောင်း ID နှင့်တကွ ပို့ပေးမည်
+        await sendMessage(clientChatId, `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ နောင်အသုံးပြုရန်အတွက် မှတ်သားထားပါ။`, MAIN_MENU_KEYBOARD);
         await sendMessage(chatId, `✅ *${boy.name}* ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
       } else if (action === 'REJ_D') {
         await deleteDoc(doc(db, 'dateboys', boyId));
@@ -168,12 +198,10 @@ export default async function handler(req, res) {
       await startBotFlow(chatId, stateRef);
       return res.status(200).json({ status: 'success' });
     }
+    
+    // Menu ခလုတ်များ
     if (text === '🔍 Date Boy ထပ်ရှာမည်') text = 'ROLE_CLIENT';
-    if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
-      const config = await getAppConfig();
-      await sendMessage(chatId, `📞 *Admin သို့ ဆက်သွယ်ရန်*\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
-      return res.status(200).json({ status: 'success' });
-    }
+    if (text === '💼 Date Boy လျှောက်မည်') text = 'ROLE_APPLICANT';
 
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
@@ -181,7 +209,7 @@ export default async function handler(req, res) {
     // ==========================================
     // 1️⃣ Client Role (Ask Client ID First)
     // ==========================================
-    if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT') {
+    if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
         await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
         await sendMessage(chatId, "🔐 *Date Boy ရှာဖွေရန် Client ID လိုအပ်ပါသည်။*\n\nကျေးဇူးပြု၍ သင့်၏ လျှို့ဝှက် Client ID အား ရိုက်ထည့်ပါ (ဥပမာ - WLC-ABC12) -\n\n(Client ID မရှိသေးပါက အောက်ပါခလုတ်ကို နှိပ်၍ တောင်းဆိုနိုင်ပါသည်။)", {
@@ -208,7 +236,6 @@ export default async function handler(req, res) {
     if (currentState.step === 'WAIT_CLIENT_ID_SS' && photos.length > 0) {
       await setDoc(stateRef, { step: 'IDLE', data: {} });
       await sendMessage(chatId, "⏳ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ စစ်ဆေးပြီးပါက သင့်အတွက် လျှို့ဝှက် Client ID ကို ဤနေရာသို့ ပို့ပေးပါမည်။");
-      const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
         const adminMsg = `🚨 *New Client ID Request* 🚨\n\nClient: [Profile](${clientProfileLink})\n\nClient မှ ID ဝယ်ယူရန် ငွေလွှဲပြေစာ ပို့ထားပါသည်။ အတည်ပြုပါက ID အလိုအလျောက် ထုတ်ပေးပါမည်။`;
@@ -225,7 +252,6 @@ export default async function handler(req, res) {
       if (snapId.empty) {
         await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
       } else {
-        // Valid Client ID -> Show Cities
         const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
         const snap = await getDocs(q);
         const cities = [...new Set(snap.docs.map(d => d.data().city))];
@@ -242,7 +268,7 @@ export default async function handler(req, res) {
     }
 
     // ==========================================
-    // 2️⃣ Applicant Info Entry Flow (No changes)
+    // 2️⃣ Applicant Info Entry Flow
     // ==========================================
     if (currentState.step === 'APPLICANT_REQUIREMENTS' && text === 'AGREE_REQ') {
       const config = await getAppConfig();
@@ -333,7 +359,6 @@ export default async function handler(req, res) {
         };
         const docRef = await addDoc(collection(db, 'dateboys'), finalData);
         
-        const adminChatId = await getAdminChatId();
         if (adminChatId) {
           const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
           const privateLinks = currentPrivate.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
