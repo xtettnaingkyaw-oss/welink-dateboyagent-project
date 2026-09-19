@@ -15,6 +15,16 @@ async function getAppConfig() {
   return cDoc.exists() ? cDoc.data() : { paymentInfo: 'Admin ကိုဆက်သွယ်ပါ', privFee: 5000, feeSec: 30000, feeDay: 70000, feeNight: 100000 };
 }
 
+// 📱 အမြဲပေါ်နေမည့် အောက်ခြေ Menu (Persistent Reply Keyboard)
+const MAIN_MENU_KEYBOARD = {
+  keyboard: [
+    [{ text: "🔄 အစသို့ ပြန်သွားမည်" }, { text: "🔍 Date Boy ထပ်ရှာမည်" }],
+    [{ text: "📞 Admin သို့ ဆက်သွယ်ရန်" }]
+  ],
+  resize_keyboard: true,
+  is_persistent: true
+};
+
 async function sendMessage(chatId, text, replyMarkup = null) {
   try {
     const body = { chat_id: chatId, text, parse_mode: 'Markdown' };
@@ -32,6 +42,40 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
+// 📸 Web App မှလာသော Base64 ပုံများကို Link ဖြင့် ပြသပေးမည့် Helper
+async function sendDateBoyCard(chatId, boy, boyId) {
+  const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+  const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
+  
+  let validLinks = [];
+  for (let i = 0; i < pPhotos.length; i++) {
+    if (pPhotos[i].startsWith('http')) validLinks.push(`[Public ပုံ ${i+1}](${pPhotos[i]})`);
+  }
+  let publicLinksText = validLinks.length > 0 ? `\n\n📸 *Public ပုံများ:* ${validLinks.join(' | ')}` : "";
+
+  const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n🍆 *Size:* ${boy.cockSize || 'N/A'}\n📍 *နေရာ:* ${boy.township}, ${boy.city}${publicLinksText}`;
+  
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }],
+      [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]
+    ]
+  };
+
+  await sendMessage(chatId, caption, keyboard);
+}
+
+// 🔄 ပင်မ စာမျက်နှာကို ပြန်ခေါ်မည့် Function
+async function startBotFlow(chatId, stateRef) {
+  await setDoc(stateRef, { step: 'CHOOSING_ROLE', data: {} });
+  await sendMessage(chatId, "✨ *WE LINK Dating Agency* မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
+    inline_keyboard: [
+      [{ text: "🔍 Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }],
+      [{ text: "💼 Date Boy လျှောက်မည်", callback_data: "ROLE_APPLICANT" }]
+    ]
+  });
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
@@ -45,7 +89,7 @@ export default async function handler(req, res) {
       username = message.from.username || message.from.first_name;
       if (message.photo && message.photo.length > 0) {
         const bestPhoto = message.photo[message.photo.length - 1];
-        fileIdToForward = bestPhoto.file_id; // For fast forwarding to Admin
+        fileIdToForward = bestPhoto.file_id;
         const fileUrl = await getTelegramFileUrl(bestPhoto.file_id);
         if (fileUrl) photos.push(fileUrl);
       }
@@ -56,6 +100,7 @@ export default async function handler(req, res) {
     }
 
     if (!chatId) return res.status(200).json({ status: 'No chatId' });
+    const stateRef = doc(db, 'telegram_states', String(chatId));
 
     // Admin Commands
     if (text === '/setadmin') {
@@ -67,7 +112,7 @@ export default async function handler(req, res) {
     // --- Admin Approval Actions via Callback Data ---
     if (text.startsWith('APP_P_') || text.startsWith('REJ_P_') || text.startsWith('APP_H_') || text.startsWith('REJ_H_')) {
       const parts = text.split('_');
-      const action = parts[0] + '_' + parts[1]; // APP_P, REJ_P, APP_H, REJ_H
+      const action = parts[0] + '_' + parts[1];
       const clientChatId = parts[2];
       const boyId = parts[3];
 
@@ -88,7 +133,7 @@ export default async function handler(req, res) {
         const nextActionKeyboard = {
           inline_keyboard: [
             [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }],
-            [{ text: "🔄 အစမှ ပြန်ရွေးမည်", callback_data: "ROLE_CLIENT" }]
+            [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]
           ]
         };
 
@@ -98,7 +143,7 @@ export default async function handler(req, res) {
         await sendMessage(clientChatId, `❌ *${boyCode}* ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === 'APP_H') {
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ *${boyCode}* နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ *${boyCode}* နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`, MAIN_MENU_KEYBOARD);
         await sendMessage(chatId, `✅ *${boyCode}* နှင့် Dating Request ကို အတည်ပြုပေးလိုက်ပါပြီ။ Client ထံ ဆက်သွယ်ပေးပါ။`);
       } else if (action === 'REJ_H') {
         await sendMessage(clientChatId, `❌ *${boyCode}* အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -108,34 +153,37 @@ export default async function handler(req, res) {
     }
     // ------------------------------------------------
 
-    // /start Command
-    if (text === '/start' || text === 'RESET') {
-      const stateRef = doc(db, 'telegram_states', String(chatId));
-      await setDoc(stateRef, { step: 'CHOOSING_ROLE', data: {} });
-      await sendMessage(chatId, "✨ *WE LINK Dating Agency* မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
-        inline_keyboard: [
-          [{ text: "🔍 Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }],
-          [{ text: "💼 Date Boy လျှောက်မည်", callback_data: "ROLE_APPLICANT" }]
-        ]
-      });
+    // 🔄 Menu Button Clicks
+    if (text === '🔄 အစသို့ ပြန်သွားမည်' || text === '/start' || text === 'RESET') {
+      await sendMessage(chatId, "ပင်မ စာမျက်နှာသို့ ပြန်သွားနေပါသည်...", MAIN_MENU_KEYBOARD);
+      await startBotFlow(chatId, stateRef);
+      return res.status(200).json({ status: 'success' });
+    }
+    
+    if (text === '🔍 Date Boy ထပ်ရှာမည်') {
+      text = 'ROLE_CLIENT'; // Force Client Flow
+    }
+
+    if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
+      const config = await getAppConfig();
+      await sendMessage(chatId, `📞 *Admin သို့ ဆက်သွယ်ရန်*\n\nယခု Bot ထဲတွင် မေးခွန်းများရှိပါက (သို့မဟုတ်) အကူအညီ လိုအပ်ပါက အောက်ပါ ဖုန်းနံပါတ် သို့မဟုတ် Telegram အကောင့်များသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount (Replace your ID here)`);
       return res.status(200).json({ status: 'success' });
     }
 
-    const stateRef = doc(db, 'telegram_states', String(chatId));
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
     // ==========================================
     // 1️⃣ Client & Applicant Role Selection
     // ==========================================
-    if (currentState.step === 'CHOOSING_ROLE') {
+    if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT') {
       if (text === 'ROLE_CLIENT') {
         const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
         const snap = await getDocs(q);
         const cities = [...new Set(snap.docs.map(d => d.data().city))];
 
         if (cities.length === 0) {
-          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။");
+          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
           await setDoc(stateRef, { step: 'IDLE', data: {} });
         } else {
           const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
@@ -196,7 +244,7 @@ export default async function handler(req, res) {
     }
     if (currentState.step === 'GET_ADDRESS' && text) {
       await setDoc(stateRef, { step: 'GET_PUBLIC_PHOTOS', data: { ...currentState.data, address: text, publicPhotos: [] } });
-      await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n🔒(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
+      await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       return res.status(200).json({ status: 'success' });
     }
 
@@ -229,7 +277,6 @@ export default async function handler(req, res) {
         const applicantData = currentState.data;
         const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
 
-        // ⚠️ ဤနေရာတွင် မြို့နယ်အသစ် ရှိ/မရှိ စစ်ဆေးပြီး မရှိပါက Pending သို့ ပို့ပေးမည် ⚠️
         const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
         const locSnap = await getDocs(locQuery);
         if (locSnap.empty) {
@@ -264,7 +311,7 @@ export default async function handler(req, res) {
         }
 
         await setDoc(stateRef, { step: 'IDLE', data: {} });
-        await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏");
+        await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏", MAIN_MENU_KEYBOARD);
       }
       return res.status(200).json({ status: 'success' });
     }
@@ -279,7 +326,6 @@ export default async function handler(req, res) {
       const townships = [...new Set(snap.docs.map(d => d.data().township))];
       
       const keyboard = townships.map(t => [{ text: `📍 ${t}`, callback_data: `TOWNSHIP_${t}` }]);
-      // 🌐 မြို့နယ်အားလုံးပြရန် ခလုတ် ထည့်သွင်းခြင်း
       keyboard.unshift([{ text: "🌐 မြို့နယ်အားလုံးပြရန်", callback_data: `TOWNSHIP_ALL_${selectedCity}` }]);
 
       await setDoc(stateRef, { step: 'CLIENT_SELECT_TOWNSHIP', data: {} });
@@ -302,34 +348,14 @@ export default async function handler(req, res) {
       const snap = await getDocs(q);
 
       if (snap.empty) {
-        await sendMessage(chatId, `⚠️ ဤနေရာတွင် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားနေရာ ပြောင်းရှာပါ။`);
+        await sendMessage(chatId, `⚠️ ဤနေရာတွင် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားနေရာ ပြောင်းရှာပါ။`, MAIN_MENU_KEYBOARD);
       } else {
         await sendMessage(chatId, `✨ *${titleMsg}* တွင် ရရှိနိုင်သော Date Boy (${snap.size} ယောက်):`);
         
         for (const dDoc of snap.docs) {
-          const boy = dDoc.data();
-          const boyId = dDoc.id;
-          const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
-          const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
-          
-          let validLinks = [];
-          for (let i = 0; i < pPhotos.length; i++) {
-            if (pPhotos[i].startsWith('http')) validLinks.push(`[Public ပုံ ${i+1}](${pPhotos[i]})`);
-          }
-          let publicLinksText = validLinks.length > 0 ? `\n\n📸 *Public ပုံများ:* ${validLinks.join(' | ')}` : "";
-
-          const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n🍆 *Size:* ${boy.cockSize || 'N/A'}\n📍 *နေရာ:* ${boy.township}, ${boy.city}${publicLinksText}`;
-          
-          const keyboard = {
-            inline_keyboard: [
-              [{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }],
-              [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]
-            ]
-          };
-
-          await sendMessage(chatId, caption, keyboard);
+          await sendDateBoyCard(chatId, dDoc.data(), dDoc.id);
         }
-        await sendMessage(chatId, "🔄 ထပ်မံရှာဖွေလိုပါက /start ကို နှိပ်ပါ။");
+        await sendMessage(chatId, "🔄 ထပ်မံရှာဖွေလိုပါက အောက်ပါ Menu ကို အသုံးပြုပါ။", MAIN_MENU_KEYBOARD);
       }
       await setDoc(stateRef, { step: 'IDLE', data: {} });
       return res.status(200).json({ status: 'success' });
