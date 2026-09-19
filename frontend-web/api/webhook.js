@@ -244,6 +244,10 @@ export default async function handler(req, res) {
         // 🔔 Admin ဆီသို့ Notification ပို့ခြင်း
         const adminChatId = await getAdminChatId();
         if (adminChatId) {
+          // ပုံများကို နှိပ်ကြည့်နိုင်သော လင့်ခ်များအဖြစ် ပြောင်းခြင်း
+          const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
+          const privateLinks = currentPrivate.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
+
           const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n` +
                            `👤 *အမည်:* ${finalData.name}\n` +
                            `🎂 *အသက်:* ${finalData.age} နှစ်\n` +
@@ -251,6 +255,8 @@ export default async function handler(req, res) {
                            `🍆 *Size:* ${finalData.cockSize}\n` +
                            `📞 *ဖုန်း:* ${finalData.phone}\n` +
                            `📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n\n` +
+                           `📸 *Public Photos:* ${publicLinks}\n` +
+                           `🔒 *Private Photos:* ${privateLinks}\n\n` +
                            `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})\n\n` +
                            `💻 ဓာတ်ပုံများနှင့် အသေးစိတ်ကို *Admin Panel* တွင် ဝင်ရောက်စစ်ဆေးနိုင်ပါသည်။`;
           await sendMessage(adminChatId, adminMsg);
