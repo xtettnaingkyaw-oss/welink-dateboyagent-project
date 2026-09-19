@@ -7,7 +7,7 @@ export default function Admin() {
   const [activeTab, setActiveTab] = useState('requests');
   const [boys, setBoys] = useState([]);
   const [locations, setLocations] = useState([]);
-  const [clientIds, setClientIds] = useState([]); // 🔑 Client IDs State
+  const [clientIds, setClientIds] = useState([]);
   
   const [newCity, setNewCity] = useState('');
   const [newTownship, setNewTownship] = useState('');
@@ -27,7 +27,7 @@ export default function Admin() {
   useEffect(() => {
     const unsubBoys = onSnapshot(query(collection(db, 'dateboys')), (snap) => setBoys(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubLocs = onSnapshot(query(collection(db, 'locations')), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    const unsubClients = onSnapshot(query(collection(db, 'client_ids')), (snap) => setClientIds(snap.docs.map(d => ({ id: d.id, ...d.data() })))); // 🔑 Fetch Client IDs
+    const unsubClients = onSnapshot(query(collection(db, 'client_ids')), (snap) => setClientIds(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     
     const unsubConfig = onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
       if (docSnap.exists()) setAppConfig(prev => ({ ...prev, ...docSnap.data() }));
@@ -42,9 +42,13 @@ export default function Admin() {
 
   const handleApprove = async (id) => {
     const boy = boys.find(b => b.id === id);
+    const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`; // 👈 Date Boy ID ထုတ်ပေးခြင်း
     await updateDoc(doc(db, 'dateboys', id), { status: 'approved' });
     if (boy && boy.telegramChatId) {
-      fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။`, useMenu: true }) }).catch(e => console.error(e));
+      fetch('/api/webhook', { 
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
+        body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ နောင်အသုံးပြုရန်အတွက် မှတ်သားထားပါ။`, useMenu: true }) 
+      }).catch(e => console.error(e));
     }
   };
 
@@ -173,7 +177,6 @@ export default function Admin() {
           </div>
         )}
 
-        {/* 🔑 Client IDs Tab (New) */}
         {activeTab === 'clients' && (
           <div className="space-y-6">
             <h3 className="text-xl font-bold text-gray-800 flex items-center gap-2"><KeyRound className="text-blue-600"/> စနစ်တွင်းရှိ Client IDs များ</h3>
