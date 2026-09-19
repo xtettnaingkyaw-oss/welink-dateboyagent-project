@@ -18,7 +18,6 @@ async function getAppConfig() {
   };
 }
 
-// 📱 Menu တွင် "Date Boy လျှောက်မည်" အား ပြောင်းလဲထည့်သွင်းထားသည်
 const MAIN_MENU_KEYBOARD = {
   keyboard: [[{ text: "🔄 အစသို့ ပြန်သွားမည်" }, { text: "🔍 Date Boy ထပ်ရှာမည်" }], [{ text: "💼 Date Boy လျှောက်မည်" }]],
   resize_keyboard: true, is_persistent: true
@@ -26,7 +25,8 @@ const MAIN_MENU_KEYBOARD = {
 
 async function sendMessage(chatId, text, replyMarkup = null) {
   try {
-    const body = { chat_id: chatId, text, parse_mode: 'Markdown', protect_content: true };
+    // Screenshot ရိုက်နိုင်ရန် protect_content ကို ယာယီ ဖြုတ်ထားပါသည်
+    const body = { chat_id: chatId, text, parse_mode: 'Markdown' };
     if (replyMarkup) body.reply_markup = replyMarkup;
     await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch (err) { console.error('SendMessage Error:', err); }
@@ -41,6 +41,7 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
+// Client များအတွက် ပြသမည့် Helper
 async function sendDateBoyCard(chatId, boy, boyId) {
   const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
@@ -100,7 +101,7 @@ export default async function handler(req, res) {
 
     const adminChatId = await getAdminChatId();
 
-    // 🔍 Admin မှ Date Boy ကို ID ဖြင့် ရှာဖွေခြင်း (ဥပမာ- WLDB-ABCDE)
+    // 🔍 Admin မှ Date Boy ကို ID ဖြင့် ရှာဖွေခြင်း (Admin View)
     if (text.toUpperCase().startsWith('WLDB-')) {
       if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
         await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
@@ -121,8 +122,28 @@ export default async function handler(req, res) {
       });
 
       if (foundBoy) {
-        await sendMessage(chatId, `🔍 စနစ်အတွင်းမှ ရှာဖွေတွေ့ရှိပါသည် -`);
-        await sendDateBoyCard(chatId, foundBoy, foundBoyId);
+        const pPhotos = Array.isArray(foundBoy.publicPhotos) ? foundBoy.publicPhotos : [];
+        const prPhotos = Array.isArray(foundBoy.privatePhotos) ? foundBoy.privatePhotos : [];
+        
+        const publicLinks = pPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
+        const privateLinks = prPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
+        const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
+
+        // 🚨 Admin အတွက် အသေးစိတ်အချက်အလက်များ
+        const adminMsg = `🔍 *Date Boy အချက်အလက် (Admin View)*\n\n` +
+                         `🆔 *Code:* ${searchCode}\n` +
+                         `👤 *အမည်:* ${foundBoy.name}\n` +
+                         `🎂 *အသက်:* ${foundBoy.age} နှစ်\n` +
+                         `📏 *အရပ်:* ${foundBoy.height} | 🍆 *Size:* ${foundBoy.cockSize || 'N/A'}\n` +
+                         `📞 *ဖုန်း:* ${foundBoy.phone}\n` +
+                         `📍 *မြို့နယ်:* ${foundBoy.township}, ${foundBoy.city}\n` +
+                         `🏠 *လိပ်စာ အသေးစိတ်:* ${foundBoy.address}\n\n` +
+                         `📸 *Public:* ${publicLinks || 'မရှိပါ'}\n` +
+                         `🔒 *Private:* ${privateLinks || 'မရှိပါ'}\n\n` +
+                         `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${tgLink})\n` +
+                         `📊 *Status:* ${foundBoy.status === 'approved' ? '✅ Approved' : (foundBoy.status === 'hidden' ? '👁️‍🗨️ Hidden' : '⏳ Pending')}`;
+
+        await sendMessage(chatId, adminMsg);
       } else {
         await sendMessage(chatId, `❌ *${searchCode}* အား စနစ်အတွင်း ရှာမတွေ့ပါ။`);
       }
@@ -162,7 +183,7 @@ export default async function handler(req, res) {
         let validLinks = [];
         for (let i = 0; i < prPhotos.length; i++) {
           if (prPhotos[i].startsWith('http')) {
-            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i], protect_content: true }) });
+            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i] }) });
           } else {
             validLinks.push(`[Private ပုံ ${i+1}](${prPhotos[i]})`);
           }
@@ -182,7 +203,6 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === 'APP_D') {
         await updateDoc(doc(db, 'dateboys', boyId), { status: 'approved' });
-        // 🔔 Date Boy လျှောက်လွှာ အတည်ပြုကြောင်း ID နှင့်တကွ ပို့ပေးမည်
         await sendMessage(clientChatId, `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ နောင်အသုံးပြုရန်အတွက် မှတ်သားထားပါ။`, MAIN_MENU_KEYBOARD);
         await sendMessage(chatId, `✅ *${boy.name}* ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
       } else if (action === 'REJ_D') {
@@ -198,10 +218,13 @@ export default async function handler(req, res) {
       await startBotFlow(chatId, stateRef);
       return res.status(200).json({ status: 'success' });
     }
-    
-    // Menu ခလုတ်များ
     if (text === '🔍 Date Boy ထပ်ရှာမည်') text = 'ROLE_CLIENT';
     if (text === '💼 Date Boy လျှောက်မည်') text = 'ROLE_APPLICANT';
+    if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
+      const config = await getAppConfig();
+      await sendMessage(chatId, `📞 *Admin သို့ ဆက်သွယ်ရန်*\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
+      return res.status(200).json({ status: 'success' });
+    }
 
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
@@ -323,6 +346,7 @@ export default async function handler(req, res) {
       await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       return res.status(200).json({ status: 'success' });
     }
+
     if (currentState.step === 'GET_PUBLIC_PHOTOS') {
       const currentPublic = currentState.data.publicPhotos || [];
       if (photos.length > 0) {
@@ -337,6 +361,7 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ status: 'success' });
     }
+
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
