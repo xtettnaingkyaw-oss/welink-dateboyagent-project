@@ -12,7 +12,11 @@ async function getAdminChatId() {
 }
 async function getAppConfig() {
   const cDoc = await getDoc(doc(db, 'settings', 'app_config'));
-  return cDoc.exists() ? cDoc.data() : { paymentInfo: 'Admin ကိုဆက်သွယ်ပါ', privFee: 5000, feeSec: 30000, feeDay: 70000, feeNight: 100000 };
+  return cDoc.exists() ? cDoc.data() : { 
+    paymentInfo: 'Admin ကိုဆက်သွယ်ပါ', privFee: 5000, feeSec: 30000, feeDay: 70000, feeNight: 100000, 
+    clientIdFee: 10000, // 👈 အသစ်ထည့်သွင်းထားသော Client ID ကြေး
+    reqText: '၁။ အသက် ၂၁ နှစ်ပြည့်ပြီးသူ ဖြစ်ရပါမည်။', ruleText: '၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရပါမည်။' 
+  };
 }
 
 const MAIN_MENU_KEYBOARD = {
@@ -40,18 +44,13 @@ async function getTelegramFileUrl(fileId) {
 async function sendDateBoyCard(chatId, boy, boyId) {
   const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
-  
   let validLinks = [];
   for (let i = 0; i < pPhotos.length; i++) {
     if (pPhotos[i].startsWith('http')) validLinks.push(`[Public ပုံ ${i+1}](${pPhotos[i]})`);
   }
   let publicLinksText = validLinks.length > 0 ? `\n\n📸 *Public ပုံများ:* ${validLinks.join(' | ')}` : "";
-
   const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${boy.age} နှစ်\n📏 *အရပ်:* ${boy.height}\n🍆 *Size:* ${boy.cockSize || 'N/A'}\n📍 *နေရာ:* ${boy.township}, ${boy.city}${publicLinksText}`;
-  
-  const keyboard = {
-    inline_keyboard: [[{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }], [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]]
-  };
+  const keyboard = { inline_keyboard: [[{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }], [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]] };
   await sendMessage(chatId, caption, keyboard);
 }
 
@@ -66,7 +65,6 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
 
-    // 🌐 Web App (Admin Panel) မှ လှမ်းခေါ်သော Notification ကို လက်ခံရန်
     if (req.body.internal_action === 'notify_user') {
       await sendMessage(req.body.chatId, req.body.text, req.body.useMenu ? MAIN_MENU_KEYBOARD : null);
       return res.status(200).json({ status: 'notified' });
@@ -101,12 +99,30 @@ export default async function handler(req, res) {
     }
 
     // --- Admin Approvals ---
-    if (text.startsWith('APP_P_') || text.startsWith('REJ_P_') || text.startsWith('APP_H_') || text.startsWith('REJ_H_') || text.startsWith('APP_D_') || text.startsWith('REJ_D_')) {
+    if (text.startsWith('APP_') || text.startsWith('REJ_')) {
       const parts = text.split('_');
-      const action = parts[0] + '_' + parts[1];
+      const action = parts[0] + '_' + parts[1]; // APP_P, REJ_P, APP_H, REJ_H, APP_D, REJ_D, APP_C, REJ_C
       const clientChatId = parts[2];
-      const boyId = parts[3];
+      const boyId = parts[3]; // For Client ID, this is just 'X'
 
+      // 🔐 Client ID Approval Logic
+      if (action === 'APP_C') {
+        const newClientId = `WLC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+        await setDoc(doc(db, 'client_ids', newClientId), {
+          clientId: newClientId, telegramChatId: clientChatId, status: 'active', createdAt: serverTimestamp()
+        });
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။\n\nသင့်၏ လျှို့ဝှက် Client ID မှာ \`${newClientId}\` ဖြစ်ပါသည်။ (Copy ကူးယူပါ)\n\nDate Boy ရှာဖွေရာတွင် ဤ ID အား အသုံးပြုနိုင်ပါသည်။`, {
+          inline_keyboard: [[{ text: "🔍 ယခု Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }]]
+        });
+        await sendMessage(chatId, `✅ Client ID: *${newClientId}* အား ဖန်တီး၍ Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
+        return res.status(200).json({ status: 'ok' });
+      } else if (action === 'REJ_C') {
+        await sendMessage(clientChatId, `❌ Client ID ဝယ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
+        await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
+        return res.status(200).json({ status: 'ok' });
+      }
+
+      // ဓာတ်ပုံ၊ Date Boy Booking နှင့် လျှောက်လွှာ အတည်ပြုခြင်း
       const boySnap = await getDoc(doc(db, 'dateboys', boyId));
       if (!boySnap.exists()) return res.status(200).json({ status: 'not found' });
       const boy = boySnap.data();
@@ -123,7 +139,6 @@ export default async function handler(req, res) {
           }
         }
         let privateLinksText = validLinks.length > 0 ? `\n\n🔒 *Private ဓာတ်ပုံများ:* ${validLinks.join(' | ')}` : "";
-
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
         await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private ပုံများဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ *${boyCode}* ၏ Private ပုံများကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
@@ -132,13 +147,11 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === 'APP_H') {
         await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ *${boyCode}* နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`, MAIN_MENU_KEYBOARD);
-        await sendMessage(chatId, `✅ Request ကို အတည်ပြုပေးလိုက်ပါပြီ။`);
+        await sendMessage(chatId, `✅ *${boyCode}* နှင့် Dating Request ကို အတည်ပြုပေးလိုက်ပါပြီ။ Client ထံ ဆက်သွယ်ပေးပါ။`);
       } else if (action === 'REJ_H') {
         await sendMessage(clientChatId, `❌ *${boyCode}* အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
-      } 
-      // Date Boy Registration Approvals
-      else if (action === 'APP_D') {
+      } else if (action === 'APP_D') {
         await updateDoc(doc(db, 'dateboys', boyId), { status: 'approved' });
         await sendMessage(clientChatId, `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။`, MAIN_MENU_KEYBOARD);
         await sendMessage(chatId, `✅ *${boy.name}* ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
@@ -156,7 +169,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
     if (text === '🔍 Date Boy ထပ်ရှာမည်') text = 'ROLE_CLIENT';
-    
     if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
       const config = await getAppConfig();
       await sendMessage(chatId, `📞 *Admin သို့ ဆက်သွယ်ရန်*\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
@@ -166,20 +178,15 @@ export default async function handler(req, res) {
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
+    // ==========================================
+    // 1️⃣ Client Role (Ask Client ID First)
+    // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT') {
       if (text === 'ROLE_CLIENT') {
-        const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-        const snap = await getDocs(q);
-        const cities = [...new Set(snap.docs.map(d => d.data().city))];
-
-        if (cities.length === 0) {
-          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
-          await setDoc(stateRef, { step: 'IDLE', data: {} });
-        } else {
-          const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
-          await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
-          await sendMessage(chatId, "🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော *မြို့* ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
-        }
+        await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
+        await sendMessage(chatId, "🔐 *Date Boy ရှာဖွေရန် Client ID လိုအပ်ပါသည်။*\n\nကျေးဇူးပြု၍ သင့်၏ လျှို့ဝှက် Client ID အား ရိုက်ထည့်ပါ (ဥပမာ - WLC-ABC12) -\n\n(Client ID မရှိသေးပါက အောက်ပါခလုတ်ကို နှိပ်၍ တောင်းဆိုနိုင်ပါသည်။)", {
+          inline_keyboard: [[{ text: "💳 Admin အား Client ID တောင်းရန်", callback_data: "REQ_CLIENT_ID" }]]
+        });
       } else if (text === 'ROLE_APPLICANT') {
         const config = await getAppConfig();
         await setDoc(stateRef, { step: 'APPLICANT_REQUIREMENTS', data: {} });
@@ -190,6 +197,53 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
+    // --- Client ID Verification / Purchase Flow ---
+    if (text === 'REQ_CLIENT_ID') {
+      const config = await getAppConfig();
+      await setDoc(stateRef, { step: 'WAIT_CLIENT_ID_SS', data: {} });
+      await sendMessage(chatId, `💳 Client ID ရယူရန်အတွက် ကျသင့်ငွေမှာ *${config.clientIdFee} ကျပ်* ဖြစ်ပါသည်။\n\nအောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n\`${config.paymentInfo}\`\n\n📸 ပြီးပါက *ငွေလွှဲပြေစာ (Screenshot)* ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
+      return res.status(200).json({ status: 'success' });
+    }
+
+    if (currentState.step === 'WAIT_CLIENT_ID_SS' && photos.length > 0) {
+      await setDoc(stateRef, { step: 'IDLE', data: {} });
+      await sendMessage(chatId, "⏳ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ စစ်ဆေးပြီးပါက သင့်အတွက် လျှို့ဝှက် Client ID ကို ဤနေရာသို့ ပို့ပေးပါမည်။");
+      const adminChatId = await getAdminChatId();
+      if (adminChatId) {
+        const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
+        const adminMsg = `🚨 *New Client ID Request* 🚨\n\nClient: [Profile](${clientProfileLink})\n\nClient မှ ID ဝယ်ယူရန် ငွေလွှဲပြေစာ ပို့ထားပါသည်။ အတည်ပြုပါက ID အလိုအလျောက် ထုတ်ပေးပါမည်။`;
+        const keyboard = { inline_keyboard: [[{ text: "✅ Approve & Generate ID", callback_data: `APP_C_${chatId}_X` }, { text: "❌ Reject", callback_data: `REJ_C_${chatId}_X` }]] };
+        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'Markdown', reply_markup: keyboard }) });
+      }
+      return res.status(200).json({ status: 'success' });
+    }
+
+    if (currentState.step === 'ASK_CLIENT_ID' && text && !text.startsWith('/')) {
+      const qId = query(collection(db, 'client_ids'), where('clientId', '==', text.trim().toUpperCase()), where('status', '==', 'active'));
+      const snapId = await getDocs(qId);
+      
+      if (snapId.empty) {
+        await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
+      } else {
+        // Valid Client ID -> Show Cities
+        const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
+        const snap = await getDocs(q);
+        const cities = [...new Set(snap.docs.map(d => d.data().city))];
+        if (cities.length === 0) {
+          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
+          await setDoc(stateRef, { step: 'IDLE', data: {} });
+        } else {
+          const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
+          await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
+          await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော *မြို့* ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+        }
+      }
+      return res.status(200).json({ status: 'success' });
+    }
+
+    // ==========================================
+    // 2️⃣ Applicant Info Entry Flow (No changes)
+    // ==========================================
     if (currentState.step === 'APPLICANT_REQUIREMENTS' && text === 'AGREE_REQ') {
       const config = await getAppConfig();
       await setDoc(stateRef, { step: 'APPLICANT_RULES', data: {} });
@@ -198,7 +252,6 @@ export default async function handler(req, res) {
       });
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'APPLICANT_RULES' && text === 'AGREE_RULES') {
       await setDoc(stateRef, { step: 'GET_NAME', data: {} });
       await sendMessage(chatId, "✍️ ကျေးဇူးပြု၍ သင့်ရဲ့ *အမည်* ကို ရိုက်ထည့်ပေးပါ:");
@@ -244,14 +297,12 @@ export default async function handler(req, res) {
       await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_PUBLIC_PHOTOS') {
       const currentPublic = currentState.data.publicPhotos || [];
       if (photos.length > 0) {
         currentPublic.push(...photos);
         await setDoc(stateRef, { step: 'GET_PUBLIC_PHOTOS', data: { ...currentState.data, publicPhotos: currentPublic } });
       }
-      
       if (currentPublic.length < 3) {
         await sendMessage(chatId, `📸 အလှဓာတ်ပုံ ${currentPublic.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
@@ -260,63 +311,45 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
         currentPrivate.push(...photos);
         await setDoc(stateRef, { step: 'GET_PRIVATE_PHOTOS', data: { ...currentState.data, privatePhotos: currentPrivate } });
       }
-      
       if (currentPrivate.length < 3) {
         await sendMessage(chatId, `🔒 ပစ္စည်းပုံ ${currentPrivate.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
         const applicantData = currentState.data;
         const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-
         const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
         const locSnap = await getDocs(locQuery);
-        if (locSnap.empty) {
-          await addDoc(collection(db, 'locations'), { city: applicantData.city, township: applicantData.township, status: 'pending' });
-        }
+        if (locSnap.empty) { await addDoc(collection(db, 'locations'), { city: applicantData.city, township: applicantData.township, status: 'pending' }); }
 
         const finalData = {
           name: applicantData.name, age: applicantData.age, height: applicantData.height, cockSize: applicantData.cockSize,
           phone: applicantData.phone, city: applicantData.city, township: applicantData.township, address: applicantData.address,
-          publicPhotos: applicantData.publicPhotos, privatePhotos: currentPrivate,
-          telegramChatId: chatId, telegramProfileLink: telegramProfileLink, status: 'pending', createdAt: serverTimestamp()
+          publicPhotos: applicantData.publicPhotos, privatePhotos: currentPrivate, telegramChatId: chatId, telegramProfileLink: telegramProfileLink, status: 'pending', createdAt: serverTimestamp()
         };
-
         const docRef = await addDoc(collection(db, 'dateboys'), finalData);
         
         const adminChatId = await getAdminChatId();
         if (adminChatId) {
           const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
           const privateLinks = currentPrivate.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
-
-          // 🚨 လိပ်စာအသေးစိတ် ထည့်သွင်းထားပြီး၊ Admin Panel စာသား ဖြုတ်ထားပါသည်
-          const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n` +
-                           `👤 *အမည်:* ${finalData.name}\n` +
-                           `🎂 *အသက်:* ${finalData.age} နှစ်\n` +
-                           `📏 *အရပ်:* ${finalData.height} | 🍆 *Size:* ${finalData.cockSize}\n` +
-                           `📞 *ဖုန်း:* ${finalData.phone}\n` +
-                           `📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n` +
-                           `🏠 *လိပ်စာ အသေးစိတ်:* ${finalData.address}\n\n` +
-                           `📸 *Public:* ${publicLinks}\n` +
-                           `🔒 *Private:* ${privateLinks}\n\n` +
-                           `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})`;
-          
-          // Telegram မှ တိုက်ရိုက် အတည်ပြုနိုင်ရန် ခလုတ်များ
+          const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n👤 *အမည်:* ${finalData.name}\n🎂 *အသက်:* ${finalData.age} နှစ်\n📏 *အရပ်:* ${finalData.height} | 🍆 *Size:* ${finalData.cockSize}\n📞 *ဖုန်း:* ${finalData.phone}\n📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n🏠 *လိပ်စာ အသေးစိတ်:* ${finalData.address}\n\n📸 *Public:* ${publicLinks}\n🔒 *Private:* ${privateLinks}\n\n🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})`;
           const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `APP_D_${chatId}_${docRef.id}` }, { text: "❌ Reject", callback_data: `REJ_D_${chatId}_${docRef.id}` }]] };
           await sendMessage(adminChatId, adminMsg, keyboard);
         }
-
         await setDoc(stateRef, { step: 'IDLE', data: {} });
         await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏", MAIN_MENU_KEYBOARD);
       }
       return res.status(200).json({ status: 'success' });
     }
 
+    // ==========================================
+    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
+    // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
       const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'), where('city', '==', selectedCity));
@@ -325,7 +358,6 @@ export default async function handler(req, res) {
       
       const keyboard = townships.map(t => [{ text: `📍 ${t}`, callback_data: `TOWNSHIP_${t}` }]);
       keyboard.unshift([{ text: "🌐 မြို့နယ်အားလုံးပြရန်", callback_data: `TOWNSHIP_ALL_${selectedCity}` }]);
-
       await setDoc(stateRef, { step: 'CLIENT_SELECT_TOWNSHIP', data: {} });
       await sendMessage(chatId, `🔍 ${selectedCity} တွင် ရှာဖွေလိုသော *မြို့နယ်* ကို ရွေးချယ်ပါ -`, { inline_keyboard: keyboard });
       return res.status(200).json({ status: 'success' });
@@ -342,16 +374,12 @@ export default async function handler(req, res) {
         q = query(collection(db, 'dateboys'), where('status', '==', 'approved'), where('township', '==', selectedTownship));
         titleMsg = selectedTownship;
       }
-
       const snap = await getDocs(q);
-
       if (snap.empty) {
         await sendMessage(chatId, `⚠️ ဤနေရာတွင် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားနေရာ ပြောင်းရှာပါ။`, MAIN_MENU_KEYBOARD);
       } else {
         await sendMessage(chatId, `✨ *${titleMsg}* တွင် ရရှိနိုင်သော Date Boy (${snap.size} ယောက်):`);
-        for (const dDoc of snap.docs) {
-          await sendDateBoyCard(chatId, dDoc.data(), dDoc.id);
-        }
+        for (const dDoc of snap.docs) { await sendDateBoyCard(chatId, dDoc.data(), dDoc.id); }
         await sendMessage(chatId, "🔄 ထပ်မံရှာဖွေလိုပါက အောက်ပါ Menu ကို အသုံးပြုပါ။", MAIN_MENU_KEYBOARD);
       }
       await setDoc(stateRef, { step: 'IDLE', data: {} });
@@ -371,7 +399,6 @@ export default async function handler(req, res) {
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
       await setDoc(stateRef, { step: 'IDLE', data: {} });
       await sendMessage(chatId, "⏳ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ စစ်ဆေးပြီးပါက Private ပုံများကို ဤနေရာသို့ ပို့ပေးပါမည်။");
-
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
@@ -395,7 +422,6 @@ export default async function handler(req, res) {
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
       await setDoc(stateRef, { step: 'IDLE', data: {} });
       await sendMessage(chatId, "⏳ Booking စရံ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ အတည်ပြုပြီးပါက အကြောင်းပြန်ပေးပါမည်။");
-
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
