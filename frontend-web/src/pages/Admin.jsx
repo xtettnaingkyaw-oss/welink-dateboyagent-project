@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, getDocs, where, setDoc } from 'firebase/firestore';
-import { UserCheck, Clock, MapPin, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard } from 'lucide-react';
+import { UserCheck, Clock, MapPin, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText } from 'lucide-react';
 
 export default function Admin() {
   const [activeTab, setActiveTab] = useState('requests');
@@ -19,13 +19,15 @@ export default function Admin() {
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
 
-  // 💰 App Config State (Fees & Payment)
+  // ⚙️ App Config State (Fees, Payments, Requirements & Rules)
   const [appConfig, setAppConfig] = useState({
     paymentInfo: 'KPay: 09123456789 (Name)',
     privFee: 5000,
     feeSec: 30000,
     feeDay: 70000,
-    feeNight: 100000
+    feeNight: 100000,
+    reqText: '၁။ အသက် ၂၁ နှစ်ပြည့်ပြီးသူ ဖြစ်ရပါမည်။\n၂။ ကိုယ်အမူအရာ သန့်ရှင်းသပ်ရပ်ရမည်။', // Default Requirements
+    ruleText: '၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရပါမည်။\n၂။ ဖောက်သည်များအား ယဉ်ကျေးစွာ ဆက်ဆံရမည်။' // Default Rules
   });
   const [isConfigSaving, setIsConfigSaving] = useState(false);
 
@@ -35,7 +37,7 @@ export default function Admin() {
     
     // Fetch App Config
     const unsubConfig = onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
-      if (docSnap.exists()) setAppConfig(docSnap.data());
+      if (docSnap.exists()) setAppConfig(prev => ({ ...prev, ...docSnap.data() }));
     });
 
     return () => { unsubBoys(); unsubLocs(); unsubConfig(); };
@@ -68,20 +70,20 @@ export default function Admin() {
   const handleApproveLocation = async (id) => updateDoc(doc(db, 'locations', id), { status: 'approved' });
   const handleDeleteLocation = async (id) => window.confirm('ဖျက်မှာ သေချာပါသလား?') && deleteDoc(doc(db, 'locations', id));
 
-  // 💾 Save App Config (Fees)
+  // 💾 Save App Config
   const handleSaveConfig = async (e) => {
     e.preventDefault();
     setIsConfigSaving(true);
     await setDoc(doc(db, 'settings', 'app_config'), appConfig, { merge: true });
     setIsConfigSaving(false);
-    alert('ဈေးနှုန်းနှင့် ငွေပေးချေမှု အချက်အလက်များ သိမ်းဆည်းပြီးပါပြီ။');
+    alert('ဆက်တင်များ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။');
   };
 
   const DateBoyCard = ({ boy, isPending }) => {
     const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
     const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
     const isEditing = editingBoyId === boy.id;
-    const boyCode = `WLDB-${boy.id.substring(0, 5).toUpperCase()}`; // Generate Unique Code
+    const boyCode = `WLDB-${boy.id.substring(0, 5).toUpperCase()}`; 
 
     return (
       <div className={`bg-white border ${boy.status === 'hidden' ? 'border-gray-300 opacity-75' : isPending ? 'border-orange-100' : 'border-green-100'} p-5 rounded-[2rem] shadow-sm flex flex-col justify-between relative`}>
@@ -142,7 +144,7 @@ export default function Admin() {
       <div className="flex flex-col sm:flex-row gap-3 bg-white p-3 rounded-[2rem] shadow-sm border sticky top-20 z-40">
         <button onClick={() => setActiveTab('requests')} className={`flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all ${activeTab === 'requests' ? 'bg-orange-500 text-white shadow-lg' : 'text-gray-500 hover:bg-orange-50'}`}><Clock size={22} /> အသစ်လျှောက်ထားသူများ {pendingBoys.length > 0 && `(${pendingBoys.length})`}</button>
         <button onClick={() => setActiveTab('dateboys')} className={`flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all ${activeTab === 'dateboys' ? 'bg-green-500 text-white shadow-lg' : 'text-gray-500 hover:bg-green-50'}`}><UserCheck size={22} /> လက်ရှိ Date Boys ({approvedBoys.length})</button>
-        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all ${activeTab === 'settings' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:bg-purple-50'}`}><Settings size={22} /> Settings & Payments</button>
+        <button onClick={() => setActiveTab('settings')} className={`flex-1 py-4 px-6 rounded-2xl font-bold flex items-center justify-center gap-3 transition-all ${activeTab === 'settings' ? 'bg-purple-600 text-white shadow-lg' : 'text-gray-500 hover:bg-purple-50'}`}><Settings size={22} /> Settings & Configs</button>
       </div>
 
       <div className="pt-4">
@@ -167,13 +169,27 @@ export default function Admin() {
         {activeTab === 'settings' && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
             
-            {/* 💰 App Configuration Form (Fees & Payments) */}
+            {/* ⚙️ App Configuration Form (Fees, Payments, Requirements & Rules) */}
             <div className="space-y-6">
               <div className="bg-white p-6 rounded-[2rem] shadow-sm border border-gray-100">
-                <h3 className="text-lg font-bold text-purple-600 flex items-center gap-2 mb-5"><CreditCard size={20}/> ဈေးနှုန်း နှင့် ငွေပေးချေမှု အချက်အလက်များ</h3>
+                <h3 className="text-lg font-bold text-purple-600 flex items-center gap-2 mb-5"><Settings size={20}/> စနစ်ထိန်းချုပ်မှုများ</h3>
                 <form onSubmit={handleSaveConfig} className="space-y-4">
+                  
+                  {/* လိုအပ်ချက် နှင့် စည်းမျဉ်းများ */}
                   <div>
-                    <label className="block text-xs font-bold text-gray-500 mb-1 ml-1">Payment Info (ဥပမာ- KPay: 09123...)</label>
+                    <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1"><FileText size={16}/> Date Boy အဖြစ် လျှောက်ထားရန် လိုအပ်သည့်အချက်များ</label>
+                    <textarea rows="4" value={appConfig.reqText} onChange={e=>setAppConfig({...appConfig, reqText: e.target.value})} className="w-full p-4 bg-gray-50 border rounded-2xl text-sm outline-none focus:border-purple-400" placeholder="ဥပမာ- ၁။ အသက် ၂၁ ပြည့်ရမည်..." required/>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1"><FileText size={16}/> Date Boy လျှောက်ထားခြင်းအတွက် စည်းမျဉ်းစည်းကမ်းများ</label>
+                    <textarea rows="4" value={appConfig.ruleText} onChange={e=>setAppConfig({...appConfig, ruleText: e.target.value})} className="w-full p-4 bg-gray-50 border rounded-2xl text-sm outline-none focus:border-purple-400" placeholder="ဥပမာ- ၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရမည်..." required/>
+                  </div>
+
+                  <hr className="my-4 border-gray-100" />
+
+                  {/* Payment & Fees */}
+                  <div>
+                    <label className="block text-sm font-bold text-gray-700 mb-1 flex items-center gap-1"><CreditCard size={16}/> Payment Info (ငွေပေးချေရန်)</label>
                     <input type="text" value={appConfig.paymentInfo} onChange={e=>setAppConfig({...appConfig, paymentInfo: e.target.value})} className="w-full p-4 bg-gray-50 border rounded-2xl text-sm outline-none focus:border-purple-400" required/>
                   </div>
                   <div className="grid grid-cols-2 gap-4">
@@ -194,19 +210,19 @@ export default function Admin() {
                       <input type="number" value={appConfig.feeNight} onChange={e=>setAppConfig({...appConfig, feeNight: Number(e.target.value)})} className="w-full p-4 bg-gray-50 border rounded-2xl text-sm outline-none focus:border-purple-400" required/>
                     </div>
                   </div>
-                  <button type="submit" disabled={isConfigSaving} className="w-full bg-purple-600 text-white p-4 rounded-2xl font-bold mt-2 disabled:opacity-50">
+                  <button type="submit" disabled={isConfigSaving} className="w-full bg-purple-600 text-white p-4 rounded-2xl font-bold mt-2 hover:bg-purple-700 disabled:opacity-50 transition-all">
                     {isConfigSaving ? 'သိမ်းဆည်းနေသည်...' : 'အချက်အလက် သိမ်းမည်'}
                   </button>
                 </form>
               </div>
 
-              {/* Add New Location (Moved here for better layout) */}
+              {/* Add New Location */}
               <div className="bg-white p-6 rounded-[2rem] shadow-sm border">
                 <h3 className="text-lg font-bold text-blue-600 flex items-center gap-2 mb-5"><Plus size={20}/> မြို့နယ် အသစ်ထည့်ရန်</h3>
                 <form onSubmit={handleAddLocation} className="flex gap-3">
                   <input type="text" value={newCity} onChange={e=>setNewCity(e.target.value)} placeholder="မြို့" className="w-1/3 p-4 bg-gray-50 border rounded-2xl text-sm" required/>
                   <input type="text" value={newTownship} onChange={e=>setNewTownship(e.target.value)} placeholder="မြို့နယ်" className="flex-1 p-4 bg-gray-50 border rounded-2xl text-sm" required/>
-                  <button type="submit" className="bg-blue-600 text-white px-6 rounded-2xl font-bold">ထည့်မည်</button>
+                  <button type="submit" className="bg-blue-600 text-white px-6 rounded-2xl font-bold hover:bg-blue-700">ထည့်မည်</button>
                 </form>
               </div>
             </div>
@@ -224,17 +240,17 @@ export default function Admin() {
                             <input type="text" value={editCity} onChange={e=>setEditCity(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl text-sm outline-none" placeholder="မြို့အမည်" />
                             <input type="text" value={editTownship} onChange={e=>setEditTownship(e.target.value)} className="w-full p-3 bg-gray-50 border rounded-xl text-sm outline-none" placeholder="မြို့နယ်အမည်" />
                             <div className="flex gap-2 mt-1">
-                              <button onClick={() => saveEditedLocation(loc)} className="flex-1 bg-green-500 text-white py-2 rounded-xl text-sm font-bold">ပြင်ဆင်ပြီး လက်ခံမည်</button>
-                              <button onClick={() => setEditingLocId(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-xl text-sm font-bold">ပယ်ဖျက်</button>
+                              <button onClick={() => saveEditedLocation(loc)} className="flex-1 bg-green-500 text-white py-2 rounded-xl text-sm font-bold hover:bg-green-600">ပြင်ဆင်ပြီး လက်ခံမည်</button>
+                              <button onClick={() => setEditingLocId(null)} className="flex-1 bg-gray-200 text-gray-700 py-2 rounded-xl text-sm font-bold hover:bg-gray-300">ပယ်ဖျက်</button>
                             </div>
                           </div>
                         ) : (
                           <div className="flex justify-between items-center">
                             <span className="font-bold text-gray-800 text-lg">{loc.township} <span className="text-sm text-orange-600 font-medium block">{loc.city}</span></span>
                             <div className="flex gap-2">
-                              <button onClick={() => startEditLocation(loc)} className="bg-blue-50 text-blue-500 p-2.5 rounded-xl"><Pencil size={18}/></button>
-                              <button onClick={() => handleApproveLocation(loc.id)} className="bg-green-500 text-white p-2.5 rounded-xl"><CheckCircle2 size={18}/></button>
-                              <button onClick={() => handleDeleteLocation(loc.id)} className="bg-red-50 text-red-500 p-2.5 rounded-xl"><Trash2 size={18}/></button>
+                              <button onClick={() => startEditLocation(loc)} className="bg-blue-50 text-blue-500 p-2.5 rounded-xl hover:bg-blue-100"><Pencil size={18}/></button>
+                              <button onClick={() => handleApproveLocation(loc.id)} className="bg-green-500 text-white p-2.5 rounded-xl hover:bg-green-600"><CheckCircle2 size={18}/></button>
+                              <button onClick={() => handleDeleteLocation(loc.id)} className="bg-red-50 text-red-500 p-2.5 rounded-xl hover:bg-red-100"><Trash2 size={18}/></button>
                             </div>
                           </div>
                         )}
