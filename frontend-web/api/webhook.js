@@ -72,7 +72,6 @@ export default async function handler(req, res) {
     const { message, callback_query } = req.body;
     let chatId, text, photos = [], fileIdToForward = null, username = null;
 
-    // 📸 Media ဖိုင်များကို ဖမ်းယူခြင်း (Photo, Video, Document)
     if (message) {
       chatId = message.chat.id;
       text = message.text ? message.text.trim() : '';
@@ -81,7 +80,7 @@ export default async function handler(req, res) {
       let targetFileId = null;
       if (message.photo && message.photo.length > 0) targetFileId = message.photo[message.photo.length - 1].file_id;
       else if (message.video) targetFileId = message.video.file_id;
-      else if (message.document) targetFileId = message.document.file_id; // Telegram မှ Video အချို့ကို Document အဖြစ် ပို့တတ်သည်
+      else if (message.document) targetFileId = message.document.file_id;
 
       if (targetFileId) {
         fileIdToForward = targetFileId;
@@ -163,7 +162,7 @@ export default async function handler(req, res) {
 
       let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
       if (reasonCode === 'R1') reasonMsg += "👉 *သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း*";
-      else if (reasonCode === 'R2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံနှင့် Video များကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
+      else if (reasonCode === 'R2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
       else if (reasonCode === 'R3') reasonMsg += "👉 *ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း*";
       else if (reasonCode === 'R4') reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
@@ -208,7 +207,6 @@ export default async function handler(req, res) {
           }
         }
         
-        // 🎬 Client ကို Private Video ပါ ပို့ပေးမည်
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
             await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo }) });
@@ -268,9 +266,6 @@ export default async function handler(req, res) {
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
-    // ==========================================
-    // 1️⃣ Client & Applicant Role Selection
-    // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
         await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
@@ -400,7 +395,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
-    // 🎬 Private Photos ကနေ Private Video ဆီကို ကူးမယ့် အဆင့်သစ်
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
@@ -410,22 +404,35 @@ export default async function handler(req, res) {
       if (currentPrivate.length < 3) {
         await sendMessage(chatId, `🔒 ပစ္စည်းပုံ ${currentPrivate.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
-        // ပုံ ၃ ပုံရပြီဆိုလျှင် Video တောင်းမည်
         await setDoc(stateRef, { step: 'GET_PRIVATE_VIDEO', data: { ...currentState.data, privatePhotos: currentPrivate } });
-        await sendMessage(chatId, "✅ ပစ္စည်းပုံ (၃) ပုံ ရရှိပါပြီ။\n\n🎬 ယခု ထောင်မတ်နေသော ဆိုဒ်သေချာစွာခန့်မှန်းနိုင်မည့် ပစ္စည်းကို လက်နှင့်ကိုင်၍ စက္ကန့် ၆၀ စာ Video အတိုလေး ပို့ပေးပါ ခင်ဗျာ:");
+        await sendMessage(chatId, "✅ ပစ္စည်းပုံ (၃) ပုံ ရရှိပါပြီ။\n\n🎬 ယခု ထောင်မတ်နေသော ဆိုဒ်သေချာစွာခန့်မှန်းနိုင်မည့် ပစ္စည်းကို လက်နှင့်ကိုင်၍ စက္ကန့် ၆၀ စာ Video အတိုလေး ပို့ပေးပါ ခင်ဗျာ\n\n(မှတ်ချက် - ၁ မိနစ်ထက်ပိုသော Video ပို့လို့မရပါ):");
       }
       return res.status(200).json({ status: 'success' });
     }
 
-    // 🎬 Private Video လက်ခံမည့် အဆင့်သစ် (Final Step for Applicant)
+    // 🎬 Private Video Validation & Final Step
     if (currentState.step === 'GET_PRIVATE_VIDEO') {
+      const isVideo = message && (message.video || message.document);
+      
+      if (!isVideo) {
+        await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ Video ဖိုင် ကိုသာ ပို့ပေးပါ ခင်ဗျာ။\n\n(မှတ်ချက် - ၁ မိနစ်ထက်ပိုသော Video ပို့လို့မရပါ)");
+        return res.status(200).json({ status: 'success' });
+      }
+
+      const videoData = message.video || message.document;
+      
+      if (videoData.duration && videoData.duration > 60) {
+        await sendMessage(chatId, "⚠️ သင့် Video မှာ ၁ မိနစ်ထက် ကျော်လွန်နေပါသည်။\n\nကျေးဇူးပြု၍ စက္ကန့် ၆၀ အောက် Video အတိုလေးသာ ပြန်လည်ပေးပို့ပါ ခင်ဗျာ။");
+        return res.status(200).json({ status: 'success' });
+      }
+      
       if (photos.length === 0) {
-        await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ Video (သို့မဟုတ်) ဖိုင် ကိုသာ ပို့ပေးပါ ခင်ဗျာ။");
+        await sendMessage(chatId, "⚠️ သင့် Video ဖိုင်အရွယ်အစားမှာ ကြီးမားလွန်းနေပါသည်။ (Telegram ကန့်သတ်ချက်အရ 20MB အောက်သာ ပို့နိုင်ပါသည်)\n\nကျေးဇူးပြု၍ File Size သေးငယ်သော (သို့) ၁ မိနစ်အောက် Video ကိုသာ ပြန်လည်ပေးပို့ပါ ခင်ဗျာ။");
         return res.status(200).json({ status: 'success' });
       }
 
       const applicantData = currentState.data;
-      const privateVideoUrl = photos[0]; // Video File URL
+      const privateVideoUrl = photos[0];
       const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
       const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
       const locSnap = await getDocs(locQuery);
@@ -434,8 +441,7 @@ export default async function handler(req, res) {
       const finalData = {
         name: applicantData.name, age: applicantData.age, height: applicantData.height, cockSize: applicantData.cockSize,
         phone: applicantData.phone, city: applicantData.city, township: applicantData.township, address: applicantData.address,
-        publicPhotos: applicantData.publicPhotos, privatePhotos: applicantData.privatePhotos, 
-        privateVideo: privateVideoUrl, // 🎬 Database တွင် Video URL သိမ်းမည်
+        publicPhotos: applicantData.publicPhotos, privatePhotos: applicantData.privatePhotos, privateVideo: privateVideoUrl, 
         telegramChatId: chatId, telegramProfileLink: telegramProfileLink, status: 'pending', createdAt: serverTimestamp()
       };
       const docRef = await addDoc(collection(db, 'dateboys'), finalData);
