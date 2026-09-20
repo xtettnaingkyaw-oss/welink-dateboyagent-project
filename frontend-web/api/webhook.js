@@ -72,14 +72,20 @@ export default async function handler(req, res) {
     const { message, callback_query } = req.body;
     let chatId, text, photos = [], fileIdToForward = null, username = null;
 
+    // 📸 Media ဖိုင်များကို ဖမ်းယူခြင်း (Photo, Video, Document)
     if (message) {
       chatId = message.chat.id;
       text = message.text ? message.text.trim() : '';
       username = message.from.username || message.from.first_name;
-      if (message.photo && message.photo.length > 0) {
-        const bestPhoto = message.photo[message.photo.length - 1];
-        fileIdToForward = bestPhoto.file_id;
-        const fileUrl = await getTelegramFileUrl(bestPhoto.file_id);
+      
+      let targetFileId = null;
+      if (message.photo && message.photo.length > 0) targetFileId = message.photo[message.photo.length - 1].file_id;
+      else if (message.video) targetFileId = message.video.file_id;
+      else if (message.document) targetFileId = message.document.file_id; // Telegram မှ Video အချို့ကို Document အဖြစ် ပို့တတ်သည်
+
+      if (targetFileId) {
+        fileIdToForward = targetFileId;
+        const fileUrl = await getTelegramFileUrl(targetFileId);
         if (fileUrl) photos.push(fileUrl);
       }
     } else if (callback_query) {
@@ -123,6 +129,7 @@ export default async function handler(req, res) {
         const prPhotos = Array.isArray(foundBoy.privatePhotos) ? foundBoy.privatePhotos : [];
         const publicLinks = pPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
         const privateLinks = prPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
+        const videoLink = foundBoy.privateVideo ? `[Video ကြည့်ရန်](${foundBoy.privateVideo})` : 'မရှိပါ';
         const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
 
         const adminMsg = `🔍 *Date Boy အချက်အလက် (Admin View)*\n\n` +
@@ -134,7 +141,8 @@ export default async function handler(req, res) {
                          `📍 *မြို့နယ်:* ${foundBoy.township}, ${foundBoy.city}\n` +
                          `🏠 *လိပ်စာ အသေးစိတ်:* ${foundBoy.address}\n\n` +
                          `📸 *Public:* ${publicLinks || 'မရှိပါ'}\n` +
-                         `🔒 *Private:* ${privateLinks || 'မရှိပါ'}\n\n` +
+                         `🔒 *Private:* ${privateLinks || 'မရှိပါ'}\n` +
+                         `🎬 *Video:* ${videoLink}\n\n` +
                          `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${tgLink})\n` +
                          `📊 *Status:* ${foundBoy.status === 'approved' ? '✅ Approved' : (foundBoy.status === 'hidden' ? '👁️‍🗨️ Hidden' : '⏳ Pending')}`;
         await sendMessage(chatId, adminMsg);
@@ -144,7 +152,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
-    // ❌ Date Boy လျှောက်လွှာ ပယ်ချရန် အကြောင်းရင်း ရွေးချယ်ခြင်း (Reject Reasons)
     if (text.startsWith('R_R')) {
       const parts = text.split('_');
       const reasonCode = parts[1]; // R1, R2, R3, R4
@@ -156,7 +163,7 @@ export default async function handler(req, res) {
 
       let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
       if (reasonCode === 'R1') reasonMsg += "👉 *သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း*";
-      else if (reasonCode === 'R2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံများကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
+      else if (reasonCode === 'R2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံနှင့် Video များကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
       else if (reasonCode === 'R3') reasonMsg += "👉 *ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း*";
       else if (reasonCode === 'R4') reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
@@ -200,10 +207,20 @@ export default async function handler(req, res) {
             validLinks.push(`[Private ပုံ ${i+1}](${prPhotos[i]})`);
           }
         }
-        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 *Private ဓာတ်ပုံများ:* ${validLinks.join(' | ')}` : "";
+        
+        // 🎬 Client ကို Private Video ပါ ပို့ပေးမည်
+        if (boy.privateVideo) {
+          if (boy.privateVideo.startsWith('http')) {
+            await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo }) });
+          } else {
+            validLinks.push(`[Private Video](${boy.privateVideo})`);
+          }
+        }
+
+        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 *Private ဓာတ်ပုံများ/Video:* ${validLinks.join(' | ')}` : "";
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private ပုံများဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
-        await sendMessage(chatId, `✅ *${boyCode}* ၏ Private ပုံများကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private အချက်အလက်များဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        await sendMessage(chatId, `✅ *${boyCode}* ၏ Private ပုံ/Video များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ *${boyCode}* ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
@@ -214,19 +231,17 @@ export default async function handler(req, res) {
         await sendMessage(clientChatId, `❌ *${boyCode}* အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } 
-      // 🌟 Date Boy အသစ် လက်ခံခြင်း (APP_D)
       else if (action === 'APP_D') {
         await updateDoc(doc(db, 'dateboys', boyId), { status: 'approved' });
-        const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ Privacy အရ​ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု​ ID အား​ သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
+        const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
         await sendMessage(clientChatId, approveMsg, MAIN_MENU_KEYBOARD);
         await sendMessage(chatId, `✅ *${boy.name}* ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
       } 
-      // ❌ Date Boy အသစ် ပယ်ချခြင်း (REJ_D) - အကြောင်းရင်း ရွေးခိုင်းမည်
       else if (action === 'REJ_D') {
         const reasonKeyboard = {
           inline_keyboard: [
             [{ text: "⚠️ အရည်အချင်း မကိုက်ညီခြင်း", callback_data: `R_R1_${clientChatId}_${boyId}` }],
-            [{ text: "📸 ပုံများ အဆင်မပြေခြင်း (ပြန်တင်ရန်)", callback_data: `R_R2_${clientChatId}_${boyId}` }],
+            [{ text: "📸 ပုံ/Video အဆင်မပြေခြင်း (ပြန်တင်ရန်)", callback_data: `R_R2_${clientChatId}_${boyId}` }],
             [{ text: "👤 ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း", callback_data: `R_R3_${clientChatId}_${boyId}` }],
             [{ text: "❌ ရိုးရိုးပယ်ချမည်", callback_data: `R_R4_${clientChatId}_${boyId}` }]
           ]
@@ -254,7 +269,7 @@ export default async function handler(req, res) {
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
     // ==========================================
-    // 1️⃣ Client Role (Ask Client ID First)
+    // 1️⃣ Client & Applicant Role Selection
     // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
@@ -295,7 +310,6 @@ export default async function handler(req, res) {
     if (currentState.step === 'ASK_CLIENT_ID' && text && !text.startsWith('/')) {
       const qId = query(collection(db, 'client_ids'), where('clientId', '==', text.trim().toUpperCase()), where('status', '==', 'active'));
       const snapId = await getDocs(qId);
-      
       if (snapId.empty) {
         await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
       } else {
@@ -370,6 +384,7 @@ export default async function handler(req, res) {
       await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       return res.status(200).json({ status: 'success' });
     }
+
     if (currentState.step === 'GET_PUBLIC_PHOTOS') {
       const currentPublic = currentState.data.publicPhotos || [];
       if (photos.length > 0) {
@@ -384,6 +399,8 @@ export default async function handler(req, res) {
       }
       return res.status(200).json({ status: 'success' });
     }
+
+    // 🎬 Private Photos ကနေ Private Video ဆီကို ကူးမယ့် အဆင့်သစ်
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
@@ -393,35 +410,52 @@ export default async function handler(req, res) {
       if (currentPrivate.length < 3) {
         await sendMessage(chatId, `🔒 ပစ္စည်းပုံ ${currentPrivate.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
-        const applicantData = currentState.data;
-        const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-        const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
-        const locSnap = await getDocs(locQuery);
-        if (locSnap.empty) { await addDoc(collection(db, 'locations'), { city: applicantData.city, township: applicantData.township, status: 'pending' }); }
-
-        const finalData = {
-          name: applicantData.name, age: applicantData.age, height: applicantData.height, cockSize: applicantData.cockSize,
-          phone: applicantData.phone, city: applicantData.city, township: applicantData.township, address: applicantData.address,
-          publicPhotos: applicantData.publicPhotos, privatePhotos: currentPrivate, telegramChatId: chatId, telegramProfileLink: telegramProfileLink, status: 'pending', createdAt: serverTimestamp()
-        };
-        const docRef = await addDoc(collection(db, 'dateboys'), finalData);
-        
-        const adminChatId = await getAdminChatId();
-        if (adminChatId) {
-          const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
-          const privateLinks = currentPrivate.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
-          const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n👤 *အမည်:* ${finalData.name}\n🎂 *အသက်:* ${finalData.age} နှစ်\n📏 *အရပ်:* ${finalData.height} | 🍆 *Size:* ${finalData.cockSize}\n📞 *ဖုန်း:* ${finalData.phone}\n📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n🏠 *လိပ်စာ အသေးစိတ်:* ${finalData.address}\n\n📸 *Public:* ${publicLinks}\n🔒 *Private:* ${privateLinks}\n\n🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})`;
-          const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `APP_D_${chatId}_${docRef.id}` }, { text: "❌ Reject", callback_data: `REJ_D_${chatId}_${docRef.id}` }]] };
-          await sendMessage(adminChatId, adminMsg, keyboard);
-        }
-        await setDoc(stateRef, { step: 'IDLE', data: {} });
-        await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏", MAIN_MENU_KEYBOARD);
+        // ပုံ ၃ ပုံရပြီဆိုလျှင် Video တောင်းမည်
+        await setDoc(stateRef, { step: 'GET_PRIVATE_VIDEO', data: { ...currentState.data, privatePhotos: currentPrivate } });
+        await sendMessage(chatId, "✅ ပစ္စည်းပုံ (၃) ပုံ ရရှိပါပြီ။\n\n🎬 ယခု ထောင်မတ်နေသော ဆိုဒ်သေချာစွာခန့်မှန်းနိုင်မည့် ပစ္စည်းကို လက်နှင့်ကိုင်၍ စက္ကန့် ၆၀ စာ Video အတိုလေး ပို့ပေးပါ ခင်ဗျာ:");
       }
       return res.status(200).json({ status: 'success' });
     }
 
+    // 🎬 Private Video လက်ခံမည့် အဆင့်သစ် (Final Step for Applicant)
+    if (currentState.step === 'GET_PRIVATE_VIDEO') {
+      if (photos.length === 0) {
+        await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ Video (သို့မဟုတ်) ဖိုင် ကိုသာ ပို့ပေးပါ ခင်ဗျာ။");
+        return res.status(200).json({ status: 'success' });
+      }
+
+      const applicantData = currentState.data;
+      const privateVideoUrl = photos[0]; // Video File URL
+      const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
+      const locQuery = query(collection(db, 'locations'), where('city', '==', applicantData.city), where('township', '==', applicantData.township));
+      const locSnap = await getDocs(locQuery);
+      if (locSnap.empty) { await addDoc(collection(db, 'locations'), { city: applicantData.city, township: applicantData.township, status: 'pending' }); }
+
+      const finalData = {
+        name: applicantData.name, age: applicantData.age, height: applicantData.height, cockSize: applicantData.cockSize,
+        phone: applicantData.phone, city: applicantData.city, township: applicantData.township, address: applicantData.address,
+        publicPhotos: applicantData.publicPhotos, privatePhotos: applicantData.privatePhotos, 
+        privateVideo: privateVideoUrl, // 🎬 Database တွင် Video URL သိမ်းမည်
+        telegramChatId: chatId, telegramProfileLink: telegramProfileLink, status: 'pending', createdAt: serverTimestamp()
+      };
+      const docRef = await addDoc(collection(db, 'dateboys'), finalData);
+      
+      const adminChatId = await getAdminChatId();
+      if (adminChatId) {
+        const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
+        const privateLinks = applicantData.privatePhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
+        const videoLink = `[Video ကြည့်ရန်](${privateVideoUrl})`;
+        const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n👤 *အမည်:* ${finalData.name}\n🎂 *အသက်:* ${finalData.age} နှစ်\n📏 *အရပ်:* ${finalData.height} | 🍆 *Size:* ${finalData.cockSize}\n📞 *ဖုန်း:* ${finalData.phone}\n📍 *မြို့နယ်:* ${finalData.township}, ${finalData.city}\n🏠 *လိပ်စာ အသေးစိတ်:* ${finalData.address}\n\n📸 *Public:* ${publicLinks}\n🔒 *Private:* ${privateLinks}\n🎬 *Video:* ${videoLink}\n\n🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})`;
+        const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `APP_D_${chatId}_${docRef.id}` }, { text: "❌ Reject", callback_data: `REJ_D_${chatId}_${docRef.id}` }]] };
+        await sendMessage(adminChatId, adminMsg, keyboard);
+      }
+      await setDoc(stateRef, { step: 'IDLE', data: {} });
+      await sendMessage(chatId, "🎉 အချက်အလက်ပေးပို့မှု အောင်မြင်စွာ ပြီးဆုံးပါပြီ။\n\nAdmin မှ ဆက်သွယ်လာတာကို စောင့်ဆိုင်းပေးပါ ခင်ဗျာ။ 🙏", MAIN_MENU_KEYBOARD);
+      return res.status(200).json({ status: 'success' });
+    }
+
     // ==========================================
-    // 3️⃣ Client Flow
+    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
     // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
