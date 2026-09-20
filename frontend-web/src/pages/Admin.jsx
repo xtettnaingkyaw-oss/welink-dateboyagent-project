@@ -227,6 +227,10 @@ export default function Admin() {
   const pendingLocations = locations.filter(loc => loc.status === 'pending');
   const approvedLocations = locations.filter(loc => loc.status !== 'pending');
 
+  // 🚀 System ထဲမှာ ရှိပြီးသား မြို့အမည်တွေကို ထုတ်ယူထားခြင်း
+  const uniqueCities = [...new Set(approvedLocations.map(l => l.city).filter(Boolean))];
+  const uniqueTownships = [...new Set(approvedLocations.map(l => l.township).filter(Boolean))];
+
   const handleApprove = async (id) => {
     const boy = boys.find(b => b.id === id);
     const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`; 
@@ -261,6 +265,7 @@ export default function Admin() {
 
   const handleAddLocation = async (e) => { e.preventDefault(); if(!newCity || !newTownship) return; await addDoc(collection(db, 'locations'), { city: newCity.trim(), township: newTownship.trim(), status: 'approved' }); setNewTownship(''); setNewCity(''); };
   const startEditLocation = (loc) => { setEditingLocId(loc.id); setEditCity(loc.city); setEditTownship(loc.township); };
+  
   const saveEditedLocation = async (loc) => {
     await updateDoc(doc(db, 'locations', loc.id), { city: editCity.trim(), township: editTownship.trim(), status: 'approved' });
     const qBoys = query(collection(db, 'dateboys'), where('city', '==', loc.city), where('township', '==', loc.township));
@@ -351,7 +356,6 @@ export default function Admin() {
 
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 mt-6 sm:mt-8 space-y-6 sm:space-y-8 animate-in fade-in duration-500">
         
-        {/* 🎛️ Responsive Navigation */}
         <div className="-mx-4 px-4 sm:mx-0 sm:px-0">
           <div className="bg-slate-200/50 p-1.5 rounded-2xl flex gap-1 overflow-x-auto hide-scrollbar border border-slate-200/80 shadow-inner">
             <TabButton tab="requests" icon={Clock} label="လျှောက်လွှာအသစ်" count={pendingBoys.length} />
@@ -495,7 +499,7 @@ export default function Admin() {
                   <form onSubmit={handleSaveConfig} className="space-y-6 sm:space-y-8">
                     
                     <div className="space-y-4 sm:space-y-5">
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><FileText size={16} className="text-slate-400"/> လျှောက်ထားသူများအတွက်</h4>
+                      <h4 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><FileText size={16} className="text-slate-400"/> လျှထားသူများအတွက်</h4>
                       <div>
                         <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1.5 sm:mb-2">လိုအပ်သည့်အချက်များ</label>
                         <textarea rows="4" value={appConfig.reqText} onChange={e=>setAppConfig({...appConfig, reqText: e.target.value})} className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all leading-relaxed" required/>
@@ -550,8 +554,24 @@ export default function Admin() {
                 <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-200">
                   <h3 className="text-sm sm:text-base font-bold text-slate-800 flex items-center gap-2 mb-4"><MapPin size={18} className="text-indigo-500"/> မြို့နယ် အသစ်ထည့်ရန်</h3>
                   <form onSubmit={handleAddLocation} className="space-y-3">
-                    <input type="text" value={newCity} onChange={e=>setNewCity(e.target.value)} placeholder="မြို့အမည် (ဥပမာ- ရန်ကုန်)" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-indigo-400 transition-all" required/>
-                    <input type="text" value={newTownship} onChange={e=>setNewTownship(e.target.value)} placeholder="မြို့နယ်အမည် (ဥပမာ- လှည်းတန်း)" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-indigo-400 transition-all" required/>
+                    <div className="flex gap-2">
+                      <input type="text" value={newCity} onChange={e=>setNewCity(e.target.value)} placeholder="မြို့အမည် (ဥပမာ- ရန်ကုန်)" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-indigo-400 transition-all" required/>
+                      {uniqueCities.length > 0 && (
+                        <select onChange={e => { if(e.target.value) setNewCity(e.target.value); e.target.value=''; }} className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm outline-none cursor-pointer w-28 sm:w-32 flex-shrink-0 text-slate-600">
+                          <option value="">ရွေးချယ်ရန်</option>
+                          {uniqueCities.map((c, i) => <option key={`nc-${i}`} value={c}>{c}</option>)}
+                        </select>
+                      )}
+                    </div>
+                    <div className="flex gap-2">
+                      <input type="text" value={newTownship} onChange={e=>setNewTownship(e.target.value)} placeholder="မြို့နယ်အမည် (ဥပမာ- လှည်းတန်း)" className="w-full p-3 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:bg-white focus:border-indigo-400 transition-all" required/>
+                      {uniqueTownships.length > 0 && (
+                        <select onChange={e => { if(e.target.value) setNewTownship(e.target.value); e.target.value=''; }} className="p-3 bg-slate-100 border border-slate-200 rounded-xl text-sm outline-none cursor-pointer w-28 sm:w-32 flex-shrink-0 text-slate-600">
+                          <option value="">ရွေးချယ်ရန်</option>
+                          {uniqueTownships.map((t, i) => <option key={`nt-${i}`} value={t}>{t}</option>)}
+                        </select>
+                      )}
+                    </div>
                     <button type="submit" className="w-full bg-slate-800 text-white p-3 rounded-xl text-sm sm:text-base font-bold hover:bg-slate-900 transition-colors flex justify-center items-center gap-1"><Plus size={18}/> ပေါင်းထည့်မည်</button>
                   </form>
                 </div>
@@ -563,10 +583,26 @@ export default function Admin() {
                       {pendingLocations.map(loc => (
                         <div key={loc.id} className="bg-white p-3 sm:p-4 rounded-2xl border border-orange-100 shadow-sm flex flex-col">
                           {editingLocId === loc.id ? (
-                            <div className="flex flex-col gap-2">
-                              <input type="text" value={editCity} onChange={e=>setEditCity(e.target.value)} className="w-full p-2 sm:p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့အမည်" />
-                              <input type="text" value={editTownship} onChange={e=>setEditTownship(e.target.value)} className="w-full p-2 sm:p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့နယ်အမည်" />
-                              <div className="flex gap-2 mt-2">
+                            <div className="flex flex-col gap-2.5">
+                              <div className="flex gap-2">
+                                <input type="text" value={editCity} onChange={e=>setEditCity(e.target.value)} className="w-full p-2 sm:p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့အမည်" />
+                                {uniqueCities.length > 0 && (
+                                  <select onChange={e => { if(e.target.value) setEditCity(e.target.value); e.target.value=''; }} className="p-2 sm:p-2.5 bg-slate-100 border border-slate-200 rounded-lg text-xs outline-none cursor-pointer w-24 sm:w-28 flex-shrink-0 text-slate-600">
+                                    <option value="">ရွေးချယ်ရန်</option>
+                                    {uniqueCities.map((c, i) => <option key={`ec-${i}`} value={c}>{c}</option>)}
+                                  </select>
+                                )}
+                              </div>
+                              <div className="flex gap-2">
+                                <input type="text" value={editTownship} onChange={e=>setEditTownship(e.target.value)} className="w-full p-2 sm:p-2.5 bg-slate-50 border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့နယ်အမည်" />
+                                {uniqueTownships.length > 0 && (
+                                  <select onChange={e => { if(e.target.value) setEditTownship(e.target.value); e.target.value=''; }} className="p-2 sm:p-2.5 bg-slate-100 border border-slate-200 rounded-lg text-xs outline-none cursor-pointer w-24 sm:w-28 flex-shrink-0 text-slate-600">
+                                    <option value="">ရွေးချယ်ရန်</option>
+                                    {uniqueTownships.map((t, i) => <option key={`et-${i}`} value={t}>{t}</option>)}
+                                  </select>
+                                )}
+                              </div>
+                              <div className="flex gap-2 mt-1">
                                 <button onClick={() => saveEditedLocation(loc)} className="flex-1 bg-green-500 text-white py-2 rounded-lg text-[10px] sm:text-xs font-bold hover:bg-green-600 transition-colors">လက်ခံမည်</button>
                                 <button onClick={() => setEditingLocId(null)} className="bg-slate-100 text-slate-600 py-2 px-3 rounded-lg text-[10px] sm:text-xs font-bold hover:bg-slate-200">ပယ်ဖျက်</button>
                               </div>
