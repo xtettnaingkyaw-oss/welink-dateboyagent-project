@@ -93,14 +93,13 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
 
-    // Admin Panel ကနေ လှမ်းခေါ်တဲ့လုပ်ဆောင်ချက်
     if (req.body.internal_action === 'notify_user') {
       await sendMessage(req.body.chatId, req.body.text, req.body.useMenu ? MAIN_MENU_KEYBOARD : null);
       return res.status(200).json({ status: 'notified' });
     }
 
     const { message, callback_query } = req.body;
-    let chatId, text, photos = [], fileIdToForward = null, username = null;
+    let chatId, text = '', photos = [], fileIdToForward = null, username = null;
 
     if (message) {
       chatId = message.chat.id;
@@ -128,21 +127,60 @@ export default async function handler(req, res) {
     if (!chatId) return res.status(200).json({ status: 'No chatId' });
     const stateRef = doc(db, 'telegram_states', String(chatId));
 
+    // 🚀 စမ်းသပ်ရန် Command အသစ် (Vercel တက်/မတက် စစ်ဆေးရန်)
+    if (text === '/ping') {
+      await sendMessage(chatId, "✅ Webhook is running (New Version)!");
+      return res.status(200).json({ status: 'success' });
+    }
+
     if (text === '/setadmin') {
       await setDoc(doc(db, 'settings', 'admin_config'), { chatId: chatId });
       await sendMessage(chatId, "✅ ဤအကောင့်ကို Admin အဖြစ် သတ်မှတ်ပြီးပါပြီ။");
       return res.status(200).json({ status: 'success' });
     }
 
+    // Input ကို Space များဖျက်ပြီး အတိအကျ စစ်ဆေးရန် (WLC-ISSVH လိုမျိုးများအတွက်)
+    const inputText = text.toUpperCase().replace(/\s+/g, '');
+
+    // 🚀 ဤနေရာတွင် Client ID Auto-Detect ပြုလုပ်ပေးသည် (Space အပိုများပါလာပါက ဖျက်ပစ်ပါသည်)
+    if (inputText.startsWith('WLC-')) {
+      try {
+        const clientDoc = await getDoc(doc(db, 'client_ids', inputText));
+        
+        if (!clientDoc.exists()) {
+          await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ မှားယွင်းနေပါသည် (ရှာမတွေ့ပါ)။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။`);
+        } else if (clientDoc.data().status !== 'active') {
+          await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ သက်တမ်းကုန်ဆုံးသွားပါပြီ။`);
+        } else {
+          const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
+          const snap = await getDocs(q);
+          const cities = [...new Set(snap.docs.map(d => (d.data().city || "").trim()).filter(Boolean))];
+          
+          if (cities.length === 0) {
+            await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
+            await setDoc(stateRef, { step: 'IDLE', data: {} });
+          } else {
+            const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c.substring(0, 40)}` }]);
+            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
+            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          }
+        }
+      } catch (err) {
+        console.error("Client ID Error:", err);
+        await sendMessage(chatId, `⚠️ Client ID စစ်ဆေးရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။ (${err.message})`);
+      }
+      return res.status(200).json({ status: 'success' });
+    }
+
     const adminChatId = await getAdminChatId();
 
-    if (text.toUpperCase().trim().startsWith('WLDB-')) {
+    if (inputText.startsWith('WLDB-')) {
       if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
         await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
         return res.status(200).json({ status: 'ok' });
       }
       
-      const searchCode = text.toUpperCase().trim();
+      const searchCode = inputText;
       const snap = await getDocs(collection(db, 'dateboys'));
       let foundBoy = null;
       let foundBoyId = null;
@@ -231,11 +269,11 @@ export default async function handler(req, res) {
       const boy = boySnap.data();
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
 
-      // 🌟 Private Photos & Videos (Link ပြဿနာ အပြည့်အဝ ဖြေရှင်းထားပါသည်)
+      // 🌟 Private Photos / Video ကို Client ဆီ Link များအဖြစ် သေချာစွာ ပြန်ပို့ပေးသည့် အပိုင်း
       if (action === 'APP_P') {
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
-        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
         
+        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
         let videoLinkText = 'မရှိပါ';
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
@@ -299,36 +337,6 @@ export default async function handler(req, res) {
 
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
-
-    // 🚀 Client ID ကို Auto Detect လုပ်သည့် အပိုင်း (အပြည့်အဝ ဖြေရှင်းထားပါသည်)
-    if (text.toUpperCase().trim().startsWith('WLC-')) {
-      try {
-        const inputId = text.trim().toUpperCase();
-        // Index မလိုဘဲ ID အတိအကျဖြင့် တိုက်ရိုက်ရှာဖွေခြင်း
-        const clientDoc = await getDoc(doc(db, 'client_ids', inputId));
-        
-        if (!clientDoc.exists() || clientDoc.data().status !== 'active') {
-          await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
-        } else {
-          const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-          const snap = await getDocs(q);
-          const cities = [...new Set(snap.docs.map(d => (d.data().city || "").trim()).filter(Boolean))];
-          
-          if (cities.length === 0) {
-            await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
-            await setDoc(stateRef, { step: 'IDLE', data: {} });
-          } else {
-            const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c.substring(0, 40)}` }]);
-            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
-            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
-          }
-        }
-      } catch (err) {
-        console.error("Client ID Error:", err);
-        await sendMessage(chatId, "⚠️ Client ID စစ်ဆေးရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။ ခဏစောင့်ပြီး ပြန်လည်ကြိုးစားကြည့်ပါ။");
-      }
-      return res.status(200).json({ status: 'success' });
-    }
 
     // ==========================================
     // 1️⃣ Client & Applicant Role Selection
@@ -600,9 +608,7 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Webhook Error Details:', error);
-    // 🛡️ Error များအားလုံးကို ဖမ်းယူ၍ User ထံသို့ အတိအကျ ပို့ပေးမည့် အပိုင်း
     if (globalChatId) {
-      // ဤနေရာတွင် Error ကြောင့် Telegram API ထပ်မံမကျရှုံးစေရန် RAW format ဖြင့် ပို့ပါသည်
       await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: globalChatId, text: `⚠️ စနစ်ချို့ယွင်းမှုဖြစ်ပေါ်နေပါသည်။ ခဏစောင့်ပြီး ပြန်လည်ကြိုးစားကြည့်ပါ။\n\n[Error Info: ${error.message}]` }) });
     }
     return res.status(200).json({ error: error.message });
