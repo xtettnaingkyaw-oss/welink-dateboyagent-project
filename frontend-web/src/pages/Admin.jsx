@@ -3,7 +3,6 @@ import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, getDocs, where, setDoc, serverTimestamp } from 'firebase/firestore';
 import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut } from 'lucide-react';
 
-// 🚀 Keyboard ပျောက်သည့် ပြဿနာကို ဖြေရှင်းရန် DateBoyCard ကို အပြင်သို့ ထုတ်ထားပါသည်
 const DateBoyCard = ({ boy, isPending, editingBoyId, editBoyData, setEditBoyData, setEditingBoyId, saveEditedBoy, handleApprove, handleDeleteDateBoy, handleToggleVisibility, startEditBoy, setModalImage }) => {
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
   const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
@@ -260,13 +259,13 @@ export default function Admin() {
   const startEditBoy = (boy) => { setEditingBoyId(boy.id); setEditBoyData({ name: boy.name, age: boy.age, height: boy.height, cockSize: boy.cockSize || '', phone: boy.phone, city: boy.city, township: boy.township, address: boy.address }); };
   const saveEditedBoy = async (id) => { await updateDoc(doc(db, 'dateboys', id), editBoyData); setEditingBoyId(null); };
 
-  const handleAddLocation = async (e) => { e.preventDefault(); if(!newCity || !newTownship) return; await addDoc(collection(db, 'locations'), { city: newCity, township: newTownship, status: 'approved' }); setNewTownship(''); setNewCity(''); };
+  const handleAddLocation = async (e) => { e.preventDefault(); if(!newCity || !newTownship) return; await addDoc(collection(db, 'locations'), { city: newCity.trim(), township: newTownship.trim(), status: 'approved' }); setNewTownship(''); setNewCity(''); };
   const startEditLocation = (loc) => { setEditingLocId(loc.id); setEditCity(loc.city); setEditTownship(loc.township); };
   const saveEditedLocation = async (loc) => {
-    await updateDoc(doc(db, 'locations', loc.id), { city: editCity, township: editTownship, status: 'approved' });
+    await updateDoc(doc(db, 'locations', loc.id), { city: editCity.trim(), township: editTownship.trim(), status: 'approved' });
     const qBoys = query(collection(db, 'dateboys'), where('city', '==', loc.city), where('township', '==', loc.township));
     const snap = await getDocs(qBoys);
-    snap.forEach(async (d) => { await updateDoc(doc(db, 'dateboys', d.id), { city: editCity, township: editTownship }); });
+    snap.forEach(async (d) => { await updateDoc(doc(db, 'dateboys', d.id), { city: editCity.trim(), township: editTownship.trim() }); });
     setEditingLocId(null);
   };
   const handleApproveLocation = async (id) => updateDoc(doc(db, 'locations', id), { status: 'approved' });
