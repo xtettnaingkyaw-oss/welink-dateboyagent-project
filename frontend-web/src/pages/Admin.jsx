@@ -4,14 +4,12 @@ import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, getDo
 import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut } from 'lucide-react';
 
 export default function Admin() {
-  // 🔐 Authentication State
   const [loggedInAdmin, setLoggedInAdmin] = useState(null);
   const [loginUser, setLoginUser] = useState('');
   const [loginPass, setLoginPass] = useState('');
   const [loginError, setLoginError] = useState('');
   const [isLoggingIn, setIsLoggingIn] = useState(false);
 
-  // 👥 Admins Management State
   const [adminUsers, setAdminUsers] = useState([]);
   const [newAdminName, setNewAdminName] = useState('');
   const [newAdminPass, setNewAdminPass] = useState('');
@@ -21,7 +19,6 @@ export default function Admin() {
   const [editAdminPass, setEditAdminPass] = useState('');
   const [editAdminRole, setEditAdminRole] = useState('sub_admin');
 
-  // App States
   const [activeTab, setActiveTab] = useState('requests');
   const [boys, setBoys] = useState([]);
   const [locations, setLocations] = useState([]);
@@ -42,13 +39,10 @@ export default function Admin() {
   });
   const [isConfigSaving, setIsConfigSaving] = useState(false);
 
-  // 🚀 Initialize and Fetch Data
   useEffect(() => {
-    // Check saved login session
     const savedAdmin = localStorage.getItem('weLinkAdmin');
     if (savedAdmin) setLoggedInAdmin(JSON.parse(savedAdmin));
 
-    // Auto-create default admin if collection is empty
     const initDefaultAdmin = async () => {
       const snap = await getDocs(collection(db, 'admin_users'));
       if (snap.empty) {
@@ -69,7 +63,6 @@ export default function Admin() {
     return () => { unsubAdmins(); unsubBoys(); unsubLocs(); unsubClients(); unsubConfig(); };
   }, []);
 
-  // 🔑 Login Function
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoggingIn(true);
@@ -95,7 +88,6 @@ export default function Admin() {
     setLoginPass('');
   };
 
-  // 🛡️ Admin User Management Functions
   const handleAddAdmin = async (e) => {
     e.preventDefault();
     const exists = adminUsers.find(a => a.username === newAdminName.trim());
@@ -119,7 +111,6 @@ export default function Admin() {
     setEditingAdminId(null);
   };
 
-  // Dateboy & Location Functions
   const pendingBoys = boys.filter(boy => boy.status === 'pending');
   const approvedBoys = boys.filter(boy => boy.status === 'approved' || boy.status === 'hidden');
   const pendingLocations = locations.filter(loc => loc.status === 'pending');
@@ -130,7 +121,8 @@ export default function Admin() {
     const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`; 
     await updateDoc(doc(db, 'dateboys', id), { status: 'approved' });
     if (boy && boy.telegramChatId) {
-      const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
+      // 🛡️ Webhook က HTML ကို Support လုပ်ဖို့ <code> tags များပြောင်းသုံးထားပါသည်
+      const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
       fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: approveMsg, useMenu: true }) }).catch(e => console.error(e));
     }
   };
@@ -138,10 +130,12 @@ export default function Admin() {
   const handleDeleteDateBoy = async (id) => {
     const reasonInput = window.prompt("ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးပါ-\n1 = အရည်အချင်းမကိုက်ညီခြင်း\n2 = ပုံ/Video များအဆင်မပြေခြင်း (ပြန်တင်ရန်)\n3 = ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း\n(Cancel နှိပ်ပါက ရိုးရိုးပယ်ချမည်)");
     if (reasonInput === null && !window.confirm('ရိုးရိုးပယ်ချမှာ သေချာပါသလား?')) return;
+    
+    // 🛡️ Webhook က HTML ကို Support လုပ်ဖို့ <b> tags များပြောင်းသုံးထားပါသည်
     let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
-    if (reasonInput === '1') reasonMsg += "👉 *သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း*";
-    else if (reasonInput === '2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
-    else if (reasonInput === '3') reasonMsg += "👉 *ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း*";
+    if (reasonInput === '1') reasonMsg += "👉 <b>သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း</b>";
+    else if (reasonInput === '2') reasonMsg += "👉 <b>ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း</b>\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
+    else if (reasonInput === '3') reasonMsg += "👉 <b>ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း</b>";
     else reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
     const boy = boys.find(b => b.id === id);
@@ -176,7 +170,6 @@ export default function Admin() {
     alert('ဆက်တင်များ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။');
   };
 
-  // 🔒 Login View
   if (!loggedInAdmin) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center p-4">
@@ -208,7 +201,6 @@ export default function Admin() {
     );
   }
 
-  // 📝 Date Boy Card Component
   const DateBoyCard = ({ boy, isPending }) => {
     const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
     const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
@@ -222,18 +214,18 @@ export default function Admin() {
         <div className="flex-1">
           {isEditing ? (
             <div className="space-y-4 mb-5 bg-slate-50 p-4 rounded-2xl border border-slate-200">
-              <input type="text" value={editBoyData.name} onChange={e=>setEditBoyData({...editBoyData, name: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="အမည်" />
+              <input type="text" value={editBoyData.name} onChange={e=>setEditBoyData({...editBoyData, name: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100 transition-all" placeholder="အမည်" />
               <div className="flex gap-3">
-                <input type="text" value={editBoyData.age} onChange={e=>setEditBoyData({...editBoyData, age: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="အသက်" />
-                <input type="text" value={editBoyData.height} onChange={e=>setEditBoyData({...editBoyData, height: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="အရပ်" />
+                <input type="text" value={editBoyData.age} onChange={e=>setEditBoyData({...editBoyData, age: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="အသက်" />
+                <input type="text" value={editBoyData.height} onChange={e=>setEditBoyData({...editBoyData, height: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="အရပ်" />
               </div>
-              <input type="text" value={editBoyData.cockSize} onChange={e=>setEditBoyData({...editBoyData, cockSize: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="Cock Size" />
-              <input type="text" value={editBoyData.phone} onChange={e=>setEditBoyData({...editBoyData, phone: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="ဖုန်း" />
+              <input type="text" value={editBoyData.cockSize} onChange={e=>setEditBoyData({...editBoyData, cockSize: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="Cock Size" />
+              <input type="text" value={editBoyData.phone} onChange={e=>setEditBoyData({...editBoyData, phone: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="ဖုန်း" />
               <div className="flex gap-3">
-                <input type="text" value={editBoyData.city} onChange={e=>setEditBoyData({...editBoyData, city: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="မြို့" />
-                <input type="text" value={editBoyData.township} onChange={e=>setEditBoyData({...editBoyData, township: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="မြို့နယ်" />
+                <input type="text" value={editBoyData.city} onChange={e=>setEditBoyData({...editBoyData, city: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="မြို့" />
+                <input type="text" value={editBoyData.township} onChange={e=>setEditBoyData({...editBoyData, township: e.target.value})} className="w-1/2 p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="မြို့နယ်" />
               </div>
-              <input type="text" value={editBoyData.address} onChange={e=>setEditBoyData({...editBoyData, address: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400" placeholder="လိပ်စာ" />
+              <input type="text" value={editBoyData.address} onChange={e=>setEditBoyData({...editBoyData, address: e.target.value})} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" placeholder="လိပ်စာ" />
             </div>
           ) : (
             <>
@@ -335,7 +327,6 @@ export default function Admin() {
 
   return (
     <div className="min-h-screen bg-slate-50 font-sans pb-12">
-      {/* 🚀 Sleek Header */}
       <header className="bg-white border-b border-slate-200 sticky top-0 z-40 shadow-sm/50">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -364,7 +355,6 @@ export default function Admin() {
 
       <main className="max-w-[1600px] mx-auto px-4 sm:px-6 lg:px-8 mt-8 space-y-8 animate-in fade-in duration-500">
         
-        {/* 🎛️ Modern Segmented Navigation */}
         <div className="bg-slate-200/50 p-1.5 rounded-2xl flex gap-1 overflow-x-auto hide-scrollbar w-fit border border-slate-200/80 shadow-inner">
           <TabButton tab="requests" icon={Clock} label="လျှောက်လွှာအသစ်များ" count={pendingBoys.length} />
           <TabButton tab="dateboys" icon={UserCheck} label="Date Boys စာရင်း" count={approvedBoys.length} />
@@ -375,7 +365,6 @@ export default function Admin() {
           )}
         </div>
 
-        {/* 📄 Content Area */}
         <div className="pt-2">
           
           {activeTab === 'requests' && (
@@ -422,12 +411,10 @@ export default function Admin() {
             </div>
           )}
 
-          {/* 🛡️ Admin Management Tab (Super Admin Only) */}
           {activeTab === 'admins' && loggedInAdmin.role === 'super_admin' && (
             <div className="space-y-6">
               <h3 className="text-xl font-bold text-slate-800">Admin အကောင့်များ စီမံခန့်ခွဲခြင်း</h3>
               
-              {/* Add New Admin Form */}
               <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
                 <h4 className="font-bold text-indigo-600 mb-5 flex items-center gap-2"><Plus size={18}/> Admin အကောင့်အသစ် ဖန်တီးရန်</h4>
                 <form onSubmit={handleAddAdmin} className="flex flex-col lg:flex-row gap-4 items-end">
@@ -450,7 +437,6 @@ export default function Admin() {
                 </form>
               </div>
 
-              {/* Admin List */}
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
                 {adminUsers.map(admin => (
                   <div key={admin.id} className="bg-white p-6 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
@@ -497,7 +483,6 @@ export default function Admin() {
           {activeTab === 'settings' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
               
-              {/* Main Settings Form */}
               <div className="xl:col-span-2 space-y-6">
                 <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
                   <div className="flex items-center gap-3 mb-8 pb-4 border-b border-slate-100">
@@ -507,7 +492,6 @@ export default function Admin() {
 
                   <form onSubmit={handleSaveConfig} className="space-y-8">
                     
-                    {/* Rules Section */}
                     <div className="space-y-5">
                       <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><FileText size={16} className="text-slate-400"/> လျှောက်ထားသူများအတွက်</h4>
                       <div>
@@ -522,7 +506,6 @@ export default function Admin() {
 
                     <hr className="border-slate-100" />
 
-                    {/* Pricing Section */}
                     <div className="space-y-5">
                       <h4 className="text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><CreditCard size={16} className="text-slate-400"/> ငွေပေးချေမှုနှင့် ဈေးနှုန်းများ</h4>
                       <div>
@@ -560,7 +543,6 @@ export default function Admin() {
                 </div>
               </div>
 
-              {/* Side Area: Locations */}
               <div className="space-y-6">
                 
                 <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200">
