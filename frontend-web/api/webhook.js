@@ -6,7 +6,6 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 const db = getFirestore(app);
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
-// 🛡️ Data များ Error မတက်စေရန် HTML ဖြင့် ကာကွယ်ပေးသည့် Helper
 function escapeHTML(str) {
   if (!str) return '';
   return str.toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
@@ -29,7 +28,6 @@ const MAIN_MENU_KEYBOARD = {
   resize_keyboard: true, is_persistent: true
 };
 
-// ⚙️ ပြဿနာမဖြစ်စေရန် parse_mode ကို 'HTML' သို့ ပြောင်းလဲထားပါသည်
 async function sendMessage(chatId, text, replyMarkup = null) {
   try {
     const body = { chat_id: chatId, text, parse_mode: 'HTML', protect_content: true };
@@ -47,15 +45,37 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
+// 🛡️ Base64 များကို ဖယ်ထုတ်၍ Telegram တွင် ပြသနိုင်သော Links များကိုသာ ရွေးချယ်ပေးမည့် Helper
+function processMediaLinks(mediaArray, typeLabel) {
+  if (!Array.isArray(mediaArray)) return "";
+  let validLinks = [];
+  let base64Count = 0;
+  
+  for (let i = 0; i < mediaArray.length; i++) {
+    if (mediaArray[i].startsWith('http')) {
+      validLinks.push(`<a href="${mediaArray[i]}">${typeLabel} ${i+1}</a>`);
+    } else if (mediaArray[i].startsWith('data:')) {
+      base64Count++;
+    }
+  }
+
+  let resultText = validLinks.length > 0 ? validLinks.join(' | ') : "";
+  if (base64Count > 0) {
+    resultText += resultText ? ` | ` : "";
+    resultText += `<i>(Web မှတင်ထားသော ${base64Count} ပုံ ပါဝင်သည်။ Admin အား တောင်းဆိုပါ)</i>`;
+  }
+  return resultText;
+}
+
 async function sendDateBoyCard(chatId, boy, boyId) {
   const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
-  let validLinks = [];
-  for (let i = 0; i < pPhotos.length; i++) {
-    if (pPhotos[i].startsWith('http')) validLinks.push(`<a href="${pPhotos[i]}">Public ပုံ ${i+1}</a>`);
-  }
-  let publicLinksText = validLinks.length > 0 ? `\n\n📸 <b>Public ပုံများ:</b> ${validLinks.join(' | ')}` : "";
-  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || 'N/A')}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicLinksText}`;
+  
+  const publicLinksText = processMediaLinks(pPhotos, "Public ပုံ");
+  const publicDisplay = publicLinksText ? `\n\n📸 <b>Public ပုံများ:</b> ${publicLinksText}` : "";
+
+  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || 'N/A')}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicDisplay}`;
+  
   const keyboard = { inline_keyboard: [[{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }], [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]] };
   await sendMessage(chatId, caption, keyboard);
 }
@@ -111,7 +131,6 @@ export default async function handler(req, res) {
 
     const adminChatId = await getAdminChatId();
 
-    // 🔍 Admin မှ Date Boy ကို ID ဖြင့် ရှာဖွေခြင်း (Trim ထည့်သွင်းထားသည်)
     if (text.toUpperCase().trim().startsWith('WLDB-')) {
       if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
         await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
@@ -125,18 +144,21 @@ export default async function handler(req, res) {
       
       snap.forEach(d => {
         const code = `WLDB-${d.id.substring(0, 5).toUpperCase()}`;
-        if (code === searchCode) {
-          foundBoy = d.data();
-          foundBoyId = d.id;
-        }
+        if (code === searchCode) { foundBoy = d.data(); foundBoyId = d.id; }
       });
 
       if (foundBoy) {
         const pPhotos = Array.isArray(foundBoy.publicPhotos) ? foundBoy.publicPhotos : [];
         const prPhotos = Array.isArray(foundBoy.privatePhotos) ? foundBoy.privatePhotos : [];
-        const publicLinks = pPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(' | ');
-        const privateLinks = prPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(' | ');
-        const videoLink = foundBoy.privateVideo ? `<a href="${foundBoy.privateVideo}">Video ကြည့်ရန်</a>` : 'မရှိပါ';
+        
+        const publicLinks = processMediaLinks(pPhotos, "Public ပုံ");
+        const privateLinks = processMediaLinks(prPhotos, "Private ပုံ");
+        let videoLink = 'မရှိပါ';
+        if (foundBoy.privateVideo) {
+          if (foundBoy.privateVideo.startsWith('http')) videoLink = `<a href="${foundBoy.privateVideo}">Video ကြည့်ရန်</a>`;
+          else videoLink = `<i>Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ</i>`;
+        }
+
         const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
 
         const adminMsg = `🔍 <b>Date Boy အချက်အလက် (Admin View)</b>\n\n` +
@@ -161,7 +183,7 @@ export default async function handler(req, res) {
 
     if (text.startsWith('R_R')) {
       const parts = text.split('_');
-      const reasonCode = parts[1]; // R1, R2, R3, R4
+      const reasonCode = parts[1];
       const clientChatId = parts[2];
       const boyId = parts[3];
       
@@ -206,26 +228,28 @@ export default async function handler(req, res) {
 
       if (action === 'APP_P') {
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
-        let validLinks = [];
+        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
+        
+        // Send normal Telegram photos directly
         for (let i = 0; i < prPhotos.length; i++) {
           if (prPhotos[i].startsWith('http')) {
-            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i] }) });
-          } else {
-            validLinks.push(`<a href="${prPhotos[i]}">Private ပုံ ${i+1}</a>`);
+            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i], protect_content: true }) });
           }
         }
         
+        let videoLinkText = "";
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
-            await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo }) });
+            await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo, protect_content: true }) });
           } else {
-            validLinks.push(`<a href="${boy.privateVideo}">Private Video</a>`);
+            videoLinkText = `\n🎬 <i>(Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ။ Admin ထံ တောင်းဆိုပါ)</i>`;
           }
         }
 
-        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 <b>Private ဓာတ်ပုံများ/Video:</b> ${validLinks.join(' | ')}` : "";
+        const displayLinks = privateLinksText ? `\n\n🔒 <b>Private ဓာတ်ပုံများ:</b> ${privateLinksText}` : "";
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${displayLinks}${videoLinkText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ <b>${boyCode}</b> ၏ Private ပုံ/Video များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -274,6 +298,9 @@ export default async function handler(req, res) {
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
+    // ==========================================
+    // 1️⃣ Client & Applicant Role Selection
+    // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
         await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
@@ -310,10 +337,14 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
+    // 🚀 Error မတက်အောင် ပြင်ဆင်ပေးထားသော Client ID စစ်ဆေးသည့် အပိုင်း
     if (currentState.step === 'ASK_CLIENT_ID' && text && !text.startsWith('/')) {
-      const qId = query(collection(db, 'client_ids'), where('clientId', '==', text.trim().toUpperCase()), where('status', '==', 'active'));
-      const snapId = await getDocs(qId);
-      if (snapId.empty) {
+      const inputId = text.trim().toUpperCase();
+      
+      // Index မလိုဘဲ ID ကိုတိုက်ရိုက်ရှာခြင်း (အလွန်မြန်ဆန်ပြီး Error မတက်ပါ)
+      const clientDoc = await getDoc(doc(db, 'client_ids', inputId));
+      
+      if (!clientDoc.exists() || clientDoc.data().status !== 'active') {
         await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
       } else {
         const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
@@ -419,7 +450,7 @@ export default async function handler(req, res) {
     if (currentState.step === 'GET_PRIVATE_VIDEO') {
       const isVideo = message && (message.video || message.document);
       if (!isVideo) {
-        await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ Video ဖိုင် ကိုသာ ပို့ပေးပါ ခင်ဗျာ။\n\n(မှတ်ချက် - ၁ မိနစ်ထက်ပိုသော Video ပို့လို့မရပါ)");
+        await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ Video ဖိုင် ကိုသာ ပို့ပေးပါ ခင်ဗျာ。\n\n(မှတ်ချက် - ၁ မိနစ်ထက်ပိုသော Video ပို့လို့မရပါ)");
         return res.status(200).json({ status: 'success' });
       }
       const videoData = message.video || message.document;
@@ -449,8 +480,8 @@ export default async function handler(req, res) {
       
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
-        const publicLinks = applicantData.publicPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(', ');
-        const privateLinks = applicantData.privatePhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(', ');
+        const publicLinks = processMediaLinks(applicantData.publicPhotos, "Public ပုံ");
+        const privateLinks = processMediaLinks(applicantData.privatePhotos, "Private ပုံ");
         const videoLink = `<a href="${privateVideoUrl}">Video ကြည့်ရန်</a>`;
         
         const adminMsg = `🚨 <b>New Date Boy Registration</b> 🚨\n\n` +
@@ -474,7 +505,7 @@ export default async function handler(req, res) {
     }
 
     // ==========================================
-    // 3️⃣ Client Flow
+    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
     // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
