@@ -221,32 +221,26 @@ export default async function handler(req, res) {
       const boy = boySnap.data();
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
 
-      // 🛡️ Web Base64 ပုံများကို ဖြေရှင်းပေးထားသည့် APP_P အပိုင်း
+      // 🌟 Private Photos / Video ကို Client ဆီ Link များအဖြစ် သေချာစွာ ပြန်ပို့ပေးသည့် အပိုင်း
       if (action === 'APP_P') {
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
-        let base64Count = 0;
         
-        for (let i = 0; i < prPhotos.length; i++) {
-          if (prPhotos[i].startsWith('http')) {
-            await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i], protect_content: true }) });
-          } else if (prPhotos[i].startsWith('data:')) {
-            base64Count++;
-          }
-        }
-        
-        let videoLinkText = "";
+        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
+        let videoLinkText = 'မရှိပါ';
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
-            await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo, protect_content: true }) });
+            videoLinkText = `<a href="${boy.privateVideo}">Video ကြည့်ရန်</a>`;
           } else {
-            videoLinkText = `\n🎬 <i>(Web မှတင်ထားသော Video ဖြစ်သဖြင့် Telegram တွင် တိုက်ရိုက်ပြ၍ မရပါ။ Admin ထံ တောင်းဆိုပါ)</i>`;
+            videoLinkText = `<i>(Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ)</i>`;
           }
         }
 
-        let base64Text = base64Count > 0 ? `\n🔒 <i>(Web မှတင်ထားသော ပုံ ${base64Count} ပုံ ပါဝင်သည်။ Admin အား တောင်းဆိုပါ)</i>` : "";
+        const displayLinks = privateLinksText ? `\n\n🔒 <b>Private ဓာတ်ပုံများ:</b> ${privateLinksText}` : "";
+        const displayVideo = boy.privateVideo ? `\n🎬 <b>Video:</b> ${videoLinkText}` : "";
+
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
         
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${base64Text}${videoLinkText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${displayLinks}${displayVideo}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ <b>${boyCode}</b> ၏ Private အချက်အလက်များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -278,12 +272,12 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
+    // Menu Navigation Commands
     if (text === '🔄 အစသို့ ပြန်သွားမည်' || text === '/start' || text === 'RESET') {
       await sendMessage(chatId, "ပင်မ စာမျက်နှာသို့ ပြန်သွားနေပါသည်...", MAIN_MENU_KEYBOARD);
       await startBotFlow(chatId, stateRef);
       return res.status(200).json({ status: 'success' });
     }
-    
     if (text === '🔍 Date Boy ထပ်ရှာမည်') text = 'ROLE_CLIENT';
     if (text === '💼 Date Boy လျှောက်မည်') text = 'ROLE_APPLICANT';
     if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
@@ -334,26 +328,31 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
-    // 🚀 Error ဖုံးကွယ်မှုကို ဖြေရှင်းထားသော Client ID စစ်ဆေးသည့် အပိုင်း
+    // 🚀 Client ID ကို စစ်ဆေးသည့် အပိုင်း (Stuck ဖြစ်ခြင်းကို အပြည့်အဝ ဖြေရှင်းထားပါသည်)
     if (currentState.step === 'ASK_CLIENT_ID' && text && !text.startsWith('/')) {
-      const inputId = text.trim().toUpperCase();
-      const clientDoc = await getDoc(doc(db, 'client_ids', inputId));
-      
-      if (!clientDoc.exists() || clientDoc.data().status !== 'active') {
-        await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
-      } else {
-        const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-        const snap = await getDocs(q);
-        const cities = [...new Set(snap.docs.map(d => d.data().city))];
-        if (cities.length === 0) {
-          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
-          await setDoc(stateRef, { step: 'IDLE', data: {} });
+      try {
+        const inputId = text.trim().toUpperCase();
+        const clientDoc = await getDoc(doc(db, 'client_ids', inputId));
+        
+        if (!clientDoc.exists() || clientDoc.data().status !== 'active') {
+          await sendMessage(chatId, "❌ သင့်၏ Client ID မှာ မှားယွင်းနေပါသည် (သို့မဟုတ်) သက်တမ်းကုန်ဆုံးသွားပါသည်။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။");
         } else {
-          // City ရွေးမည့်အဆင့်တွင် "မြို့နယ်အားလုံးပြရန်" ခလုတ် မလိုအပ်ပါသဖြင့် ဖယ်ရှားထားပါသည်
-          const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
-          await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
-          await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ。\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
+          const snap = await getDocs(q);
+          const cities = [...new Set(snap.docs.map(d => d.data().city))];
+          
+          if (cities.length === 0) {
+            await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
+            await setDoc(stateRef, { step: 'IDLE', data: {} });
+          } else {
+            const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
+            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
+            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          }
         }
+      } catch (err) {
+        console.error("Client ID Check Error:", err);
+        await sendMessage(chatId, `⚠️ Client ID စစ်ဆေးရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။ (${err.message})`);
       }
       return res.status(200).json({ status: 'success' });
     }
@@ -501,7 +500,7 @@ export default async function handler(req, res) {
     }
 
     // ==========================================
-    // 3️⃣ Client Flow
+    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
     // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
@@ -586,7 +585,6 @@ export default async function handler(req, res) {
 
     return res.status(200).json({ status: 'ok' });
 
-  // 🛡️ Error တက်ပါက ချက်ချင်းဖမ်းယူ၍ User ထံ အသိပေးမည်
   } catch (error) {
     console.error('Webhook Error:', error);
     if (globalChatId) {
