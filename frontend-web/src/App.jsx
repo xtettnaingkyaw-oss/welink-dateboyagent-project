@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { UserPlus, Search, HeartHandshake, Lock, Unlock } from 'lucide-react';
+import { UserPlus, Search, HeartHandshake } from 'lucide-react';
 import Home from './pages/Home';
 import Register from './pages/Register';
 import Admin from './pages/Admin';
@@ -44,54 +44,6 @@ function Navigation() {
   );
 }
 
-// 🔒 Admin Password ဖြင့် ကာကွယ်ပေးမည့် Component 🔒
-function ProtectedAdmin() {
-  const [isAuthenticated, setIsAuthenticated] = useState(false);
-  const [password, setPassword] = useState('');
-
-  const handleLogin = (e) => {
-    e.preventDefault();
-    // အောက်ပါ 'shangrila123' နေရာတွင် Admin Password ကို လိုသလို ပြောင်းလဲနိုင်ပါသည်
-    if (password === 'shangrila123') {
-      setIsAuthenticated(true);
-    } else {
-      alert('စကားဝှက် (Password) မှားယွင်းနေပါသည်။');
-    }
-  };
-
-  if (!isAuthenticated) {
-    return (
-      <div className="min-h-[80vh] flex items-center justify-center p-4">
-        <div className="bg-white p-8 rounded-[2rem] shadow-xl border border-gray-100 max-w-md w-full text-center space-y-6">
-          <div className="w-20 h-20 bg-purple-50 rounded-full flex items-center justify-center mx-auto text-purple-600 shadow-inner">
-            <Lock size={36} />
-          </div>
-          <div>
-            <h2 className="text-2xl font-black text-gray-800">Admin Login</h2>
-            <p className="text-gray-400 text-sm mt-1">ဤနေရာသည် အလုပ်ရှင်/မန်နေဂျာများအတွက်သာ ဖြစ်ပါသည်။</p>
-          </div>
-          <form onSubmit={handleLogin} className="space-y-4">
-            <input 
-              type="password" 
-              placeholder="Admin Password ထည့်ပါ..." 
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full px-5 py-4 rounded-2xl bg-gray-50 border-2 border-gray-100 focus:border-purple-500 outline-none font-medium text-center tracking-widest text-lg"
-              required
-            />
-            <button type="submit" className="w-full bg-purple-600 hover:bg-purple-700 text-white font-black py-4 rounded-2xl shadow-lg shadow-purple-500/30 transition-all flex items-center justify-center gap-2">
-              <Unlock size={20} /> ဝင်ရောက်မည်
-            </button>
-          </form>
-          <p className="text-xs text-gray-400">Default Password: shangrila123</p>
-        </div>
-      </div>
-    );
-  }
-
-  return <Admin />;
-}
-
 export default function App() {
   return (
     <Router>
@@ -101,7 +53,8 @@ export default function App() {
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<Register />} />
-            <Route path="/admin" element={<ProtectedAdmin />} />
+            {/* Login အဟောင်းကြီးကို ဖယ်ထုတ်ပြီး၊ Admin.jsx ကို တိုက်ရိုက်ချိတ်ဆက်လိုက်ပါသည် */}
+            <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>
       </div>
