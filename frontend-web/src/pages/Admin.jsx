@@ -28,7 +28,6 @@ export default function Admin() {
     const unsubBoys = onSnapshot(query(collection(db, 'dateboys')), (snap) => setBoys(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubLocs = onSnapshot(query(collection(db, 'locations')), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubClients = onSnapshot(query(collection(db, 'client_ids')), (snap) => setClientIds(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-    
     const unsubConfig = onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
       if (docSnap.exists()) setAppConfig(prev => ({ ...prev, ...docSnap.data() }));
     });
@@ -42,30 +41,33 @@ export default function Admin() {
 
   const handleApprove = async (id) => {
     const boy = boys.find(b => b.id === id);
-    const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`; // 👈 Date Boy ID ထုတ်ပေးခြင်း
+    const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`; 
     await updateDoc(doc(db, 'dateboys', id), { status: 'approved' });
     if (boy && boy.telegramChatId) {
-      fetch('/api/webhook', { 
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, 
-        body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: `🎉 ဝမ်းသာပါတယ် ခင်ဗျာ! သင့်ရဲ့ Date Boy လျှောက်လွှာကို Admin မှ အတည်ပြုပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ နောင်အသုံးပြုရန်အတွက် မှတ်သားထားပါ။`, useMenu: true }) 
-      }).catch(e => console.error(e));
+      const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
+      fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: approveMsg, useMenu: true }) }).catch(e => console.error(e));
     }
   };
 
   const handleDeleteDateBoy = async (id) => {
-    if (window.confirm('ဖျက်ပစ်မှာ သေချာပါသလား?')) {
-      const boy = boys.find(b => b.id === id);
-      if (boy && boy.status === 'pending' && boy.telegramChatId) {
-        fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: `❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။` }) }).catch(e => console.error(e));
-      }
-      await deleteDoc(doc(db, 'dateboys', id));
+    const reasonInput = window.prompt("ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးပါ-\n1 = အရည်အချင်းမကိုက်ညီခြင်း\n2 = ပုံများအဆင်မပြေခြင်း (ပြန်တင်ရန်)\n3 = ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း\n(Cancel နှိပ်ပါက ရိုးရိုးပယ်ချမည်)");
+    
+    if (reasonInput === null && !window.confirm('ရိုးရိုးပယ်ချမှာ သေချာပါသလား?')) return;
+    
+    let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
+    if (reasonInput === '1') reasonMsg += "👉 *သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း*";
+    else if (reasonInput === '2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံများကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
+    else if (reasonInput === '3') reasonMsg += "👉 *ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း*";
+    else reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
+
+    const boy = boys.find(b => b.id === id);
+    if (boy && boy.status === 'pending' && boy.telegramChatId) {
+      fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: reasonMsg, useMenu: true }) }).catch(e => console.error(e));
     }
+    await deleteDoc(doc(db, 'dateboys', id));
   };
 
-  const handleDeleteClientId = async (id) => {
-    if (window.confirm('ဤ Client ID ကို ပယ်ဖျက်မှာ သေချာပါသလား?')) await deleteDoc(doc(db, 'client_ids', id));
-  };
-
+  const handleDeleteClientId = async (id) => { if (window.confirm('ဤ Client ID ကို ပယ်ဖျက်မှာ သေချာပါသလား?')) await deleteDoc(doc(db, 'client_ids', id)); };
   const handleToggleVisibility = async (boy) => updateDoc(doc(db, 'dateboys', boy.id), { status: boy.status === 'hidden' ? 'approved' : 'hidden' });
   const startEditBoy = (boy) => { setEditingBoyId(boy.id); setEditBoyData({ name: boy.name, age: boy.age, height: boy.height, cockSize: boy.cockSize || '', phone: boy.phone, city: boy.city, township: boy.township, address: boy.address }); };
   const saveEditedBoy = async (id) => { await updateDoc(doc(db, 'dateboys', id), editBoyData); setEditingBoyId(null); };
