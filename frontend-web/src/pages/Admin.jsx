@@ -144,11 +144,16 @@ export default function Admin() {
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
 
+  // Settings State များကို ပိုင်းခြားထားပါသည်
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '', privFee: 0, feeSec: 0, feeDay: 0, feeNight: 0, clientIdFee: 0,
     reqText: '', ruleText: ''
   });
   const [isConfigSaving, setIsConfigSaving] = useState(false);
+  const [isEditingRules, setIsEditingRules] = useState(false);
+  const [draftRules, setDraftRules] = useState({ reqText: '', ruleText: '' });
+  const [isEditingPricing, setIsEditingPricing] = useState(false);
+  const [draftPricing, setDraftPricing] = useState({ paymentInfo: '', privFee: 0, feeSec: 0, feeDay: 0, feeNight: 0, clientIdFee: 0 });
 
   useEffect(() => {
     const savedAdmin = localStorage.getItem('weLinkAdmin');
@@ -227,7 +232,6 @@ export default function Admin() {
   const pendingLocations = locations.filter(loc => loc.status === 'pending');
   const approvedLocations = locations.filter(loc => loc.status !== 'pending');
 
-  // 🚀 System ထဲမှာ ရှိပြီးသား မြို့အမည်တွေကို ထုတ်ယူထားခြင်း
   const uniqueCities = [...new Set(approvedLocations.map(l => l.city).filter(Boolean))];
   const uniqueTownships = [...new Set(approvedLocations.map(l => l.township).filter(Boolean))];
 
@@ -276,12 +280,26 @@ export default function Admin() {
   const handleApproveLocation = async (id) => updateDoc(doc(db, 'locations', id), { status: 'approved' });
   const handleDeleteLocation = async (id) => window.confirm('ဖျက်မှာ သေချာပါသလား?') && deleteDoc(doc(db, 'locations', id));
 
-  const handleSaveConfig = async (e) => {
-    e.preventDefault();
+  // Settings Save Functions
+  const startEditRules = () => {
+    setDraftRules({ reqText: appConfig.reqText, ruleText: appConfig.ruleText });
+    setIsEditingRules(true);
+  };
+  const startEditPricing = () => {
+    setDraftPricing({ paymentInfo: appConfig.paymentInfo, clientIdFee: appConfig.clientIdFee, privFee: appConfig.privFee, feeSec: appConfig.feeSec, feeDay: appConfig.feeDay, feeNight: appConfig.feeNight });
+    setIsEditingPricing(true);
+  };
+  const handleSaveRules = async () => {
     setIsConfigSaving(true);
-    await setDoc(doc(db, 'settings', 'app_config'), appConfig, { merge: true });
+    await setDoc(doc(db, 'settings', 'app_config'), draftRules, { merge: true });
     setIsConfigSaving(false);
-    alert('ဆက်တင်များ အောင်မြင်စွာ သိမ်းဆည်းပြီးပါပြီ။');
+    setIsEditingRules(false);
+  };
+  const handleSavePricing = async () => {
+    setIsConfigSaving(true);
+    await setDoc(doc(db, 'settings', 'app_config'), draftPricing, { merge: true });
+    setIsConfigSaving(false);
+    setIsEditingPricing(false);
   };
 
   if (!loggedInAdmin) {
@@ -489,66 +507,135 @@ export default function Admin() {
           {activeTab === 'settings' && (
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6 sm:gap-8">
               
-              <div className="xl:col-span-2 space-y-6">
+              <div className="xl:col-span-2 space-y-6 sm:space-y-8">
+                
+                {/* 📝 စည်းမျဉ်းစည်းကမ်းများ ကတ် (Card 1) */}
                 <div className="bg-white p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-200">
-                  <div className="flex items-center gap-3 mb-6 sm:mb-8 pb-4 border-b border-slate-100">
-                    <div className="w-8 h-8 sm:w-10 sm:h-10 bg-indigo-50 rounded-lg flex items-center justify-center"><Settings className="text-indigo-600" size={18}/></div>
-                    <div><h3 className="text-base sm:text-lg font-bold text-slate-800">အထွေထွေ ဆက်တင်များ</h3><p className="text-[10px] sm:text-xs text-slate-500 font-medium mt-0.5">ဈေးနှုန်းများနှင့် စည်းမျဉ်းများကို ပြင်ဆင်ရန်</p></div>
+                  <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                    <h4 className="text-sm sm:text-base font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                      <FileText size={18} className="text-indigo-500"/> လျှောက်ထားသူများအတွက်
+                    </h4>
+                    {!isEditingRules && (
+                      <button onClick={startEditRules} className="flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border border-slate-200 transition-colors">
+                        <Pencil size={14}/> ပြင်မည်
+                      </button>
+                    )}
                   </div>
 
-                  <form onSubmit={handleSaveConfig} className="space-y-6 sm:space-y-8">
-                    
-                    <div className="space-y-4 sm:space-y-5">
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><FileText size={16} className="text-slate-400"/> လျှထားသူများအတွက်</h4>
+                  {isEditingRules ? (
+                    <div className="space-y-4 sm:space-y-5 animate-in fade-in slide-in-from-top-2">
                       <div>
                         <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1.5 sm:mb-2">လိုအပ်သည့်အချက်များ</label>
-                        <textarea rows="4" value={appConfig.reqText} onChange={e=>setAppConfig({...appConfig, reqText: e.target.value})} className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all leading-relaxed" required/>
+                        <textarea rows="4" value={draftRules.reqText} onChange={e=>setDraftRules({...draftRules, reqText: e.target.value})} className="w-full p-3 sm:p-4 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all leading-relaxed" required/>
                       </div>
                       <div>
                         <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1.5 sm:mb-2">စည်းမျဉ်းစည်းကမ်းများ</label>
-                        <textarea rows="4" value={appConfig.ruleText} onChange={e=>setAppConfig({...appConfig, ruleText: e.target.value})} className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all leading-relaxed" required/>
+                        <textarea rows="4" value={draftRules.ruleText} onChange={e=>setDraftRules({...draftRules, ruleText: e.target.value})} className="w-full p-3 sm:p-4 bg-white border border-slate-200 rounded-2xl text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all leading-relaxed" required/>
+                      </div>
+                      <div className="flex gap-2 pt-3">
+                        <button onClick={handleSaveRules} disabled={isConfigSaving} className="flex-1 bg-indigo-600 text-white p-3 rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                          {isConfigSaving ? 'သိမ်းနေသည်...' : <><Save size={16}/> သိမ်းမည်</>}
+                        </button>
+                        <button onClick={() => setIsEditingRules(false)} className="px-5 sm:px-6 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200 transition-colors">ပယ်ဖျက်</button>
                       </div>
                     </div>
+                  ) : (
+                    <div className="space-y-5">
+                      <div>
+                        <label className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">လိုအပ်သည့်အချက်များ</label>
+                        <div className="text-xs sm:text-sm bg-slate-50 p-4 rounded-2xl border border-slate-100 whitespace-pre-wrap text-slate-700 leading-relaxed">{appConfig.reqText || '-'}</div>
+                      </div>
+                      <div>
+                        <label className="text-[10px] sm:text-xs font-bold text-slate-400 uppercase tracking-wider block mb-2">စည်းမျဉ်းစည်းကမ်းများ</label>
+                        <div className="text-xs sm:text-sm bg-slate-50 p-4 rounded-2xl border border-slate-100 whitespace-pre-wrap text-slate-700 leading-relaxed">{appConfig.ruleText || '-'}</div>
+                      </div>
+                    </div>
+                  )}
+                </div>
 
-                    <hr className="border-slate-100" />
+                {/* 💳 ငွေပေးချေမှုနှင့် ဈေးနှုန်းများ ကတ် (Card 2) */}
+                <div className="bg-white p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-200">
+                  <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
+                    <h4 className="text-sm sm:text-base font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
+                      <CreditCard size={18} className="text-indigo-500"/> ငွေပေးချေမှုနှင့် ဈေးနှုန်း
+                    </h4>
+                    {!isEditingPricing && (
+                      <button onClick={startEditPricing} className="flex items-center gap-1.5 bg-slate-50 hover:bg-slate-100 text-slate-600 px-3 sm:px-4 py-2 rounded-xl text-xs sm:text-sm font-bold border border-slate-200 transition-colors">
+                        <Pencil size={14}/> ပြင်မည်
+                      </button>
+                    )}
+                  </div>
 
-                    <div className="space-y-4 sm:space-y-5">
-                      <h4 className="text-xs sm:text-sm font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2"><CreditCard size={16} className="text-slate-400"/> ငွေပေးချေမှုနှင့် ဈေးနှုန်းများ</h4>
+                  {isEditingPricing ? (
+                    <div className="space-y-4 sm:space-y-5 animate-in fade-in slide-in-from-top-2">
                       <div>
                         <label className="block text-xs sm:text-sm font-semibold text-slate-700 mb-1.5 sm:mb-2">Payment Info (ငွေလွှဲရန် အချက်အလက်)</label>
-                        <input type="text" value={appConfig.paymentInfo} onChange={e=>setAppConfig({...appConfig, paymentInfo: e.target.value})} className="w-full p-3 sm:p-4 bg-slate-50 border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-4 focus:ring-indigo-50 transition-all" required/>
+                        <input type="text" value={draftPricing.paymentInfo} onChange={e=>setDraftPricing({...draftPricing, paymentInfo: e.target.value})} className="w-full p-3 sm:p-4 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 focus:ring-4 focus:ring-indigo-50 transition-all" required/>
                       </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-5">
                         <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-500 mb-2 uppercase">Client ID ဝယ်ယူခ (Ks)</label>
-                          <input type="number" value={appConfig.clientIdFee} onChange={e=>setAppConfig({...appConfig, clientIdFee: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                          <input type="number" value={draftPricing.clientIdFee} onChange={e=>setDraftPricing({...draftPricing, clientIdFee: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
                         </div>
                         <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-500 mb-2 uppercase">Private Photo Fee (Ks)</label>
-                          <input type="number" value={appConfig.privFee} onChange={e=>setAppConfig({...appConfig, privFee: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                          <input type="number" value={draftPricing.privFee} onChange={e=>setDraftPricing({...draftPricing, privFee: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
                         </div>
                         <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-500 mb-2 uppercase">Dating Fee - Section (Ks)</label>
-                          <input type="number" value={appConfig.feeSec} onChange={e=>setAppConfig({...appConfig, feeSec: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                          <input type="number" value={draftPricing.feeSec} onChange={e=>setDraftPricing({...draftPricing, feeSec: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
                         </div>
                         <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-500 mb-2 uppercase">Dating Fee - Day (Ks)</label>
-                          <input type="number" value={appConfig.feeDay} onChange={e=>setAppConfig({...appConfig, feeDay: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                          <input type="number" value={draftPricing.feeDay} onChange={e=>setDraftPricing({...draftPricing, feeDay: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
                         </div>
                         <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-200">
                           <label className="block text-[10px] sm:text-xs font-bold text-slate-500 mb-2 uppercase">Dating Fee - Night (Ks)</label>
-                          <input type="number" value={appConfig.feeNight} onChange={e=>setAppConfig({...appConfig, feeNight: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                          <input type="number" value={draftPricing.feeNight} onChange={e=>setDraftPricing({...draftPricing, feeNight: Number(e.target.value)})} className="w-full p-2.5 sm:p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-indigo-400 transition-all" required/>
+                        </div>
+                      </div>
+                      <div className="flex gap-2 pt-3">
+                        <button onClick={handleSavePricing} disabled={isConfigSaving} className="flex-1 bg-indigo-600 text-white p-3 rounded-xl text-sm font-bold hover:bg-indigo-700 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
+                          {isConfigSaving ? 'သိမ်းနေသည်...' : <><Save size={16}/> သိမ်းမည်</>}
+                        </button>
+                        <button onClick={() => setIsEditingPricing(false)} className="px-5 sm:px-6 bg-slate-100 text-slate-600 rounded-xl text-sm font-bold hover:bg-slate-200 transition-colors">ပယ်ဖျက်</button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div className="bg-indigo-50 p-4 rounded-2xl border border-indigo-100 flex items-center justify-between">
+                        <span className="text-[10px] sm:text-xs font-bold text-indigo-500 uppercase">Payment Info</span>
+                        <span className="text-sm font-bold text-slate-800">{appConfig.paymentInfo || '-'}</span>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 sm:gap-4">
+                        <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Client ID</span>
+                          <span className="text-sm font-bold text-slate-700">{appConfig.clientIdFee} Ks</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Private Photo</span>
+                          <span className="text-sm font-bold text-slate-700">{appConfig.privFee} Ks</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Section Fee</span>
+                          <span className="text-sm font-bold text-slate-700">{appConfig.feeSec} Ks</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Day Fee</span>
+                          <span className="text-sm font-bold text-slate-700">{appConfig.feeDay} Ks</span>
+                        </div>
+                        <div className="col-span-2 bg-slate-50 p-3 sm:p-4 rounded-2xl border border-slate-100">
+                          <span className="text-[10px] font-bold text-slate-400 block mb-1 uppercase">Night Fee</span>
+                          <span className="text-sm font-bold text-slate-700">{appConfig.feeNight} Ks</span>
                         </div>
                       </div>
                     </div>
-
-                    <button type="submit" disabled={isConfigSaving} className="w-full bg-indigo-600 text-white p-3 sm:p-4 rounded-2xl text-sm sm:text-base font-bold mt-6 hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md shadow-indigo-200 flex items-center justify-center gap-2">
-                      {isConfigSaving ? 'သိမ်းဆည်းနေသည်...' : <><Save size={18}/> အချက်အလက်များ သိမ်းမည်</>}
-                    </button>
-                  </form>
+                  )}
                 </div>
+
               </div>
 
+              {/* 📍 မြို့နယ်များစီမံရန် အပိုင်း */}
               <div className="space-y-6">
                 
                 <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-200">
@@ -581,7 +668,7 @@ export default function Admin() {
                     <h3 className="text-xs sm:text-sm font-bold text-orange-700 mb-4 flex items-center gap-2 uppercase tracking-wider"><Clock size={16}/> အတည်ပြုရန် မြို့နယ်များ</h3>
                     <div className="space-y-3">
                       {pendingLocations.map(loc => (
-                        <div key={loc.id} className="bg-white p-3 sm:p-4 rounded-2xl border border-orange-100 shadow-sm flex flex-col">
+                        <div key={loc.id} className="bg-white p-3 sm:p-4 rounded-2xl border border-orange-100 shadow-sm flex flex-col group">
                           {editingLocId === loc.id ? (
                             <div className="flex flex-col gap-2.5">
                               <div className="flex gap-2">
@@ -610,7 +697,7 @@ export default function Admin() {
                           ) : (
                             <div className="flex justify-between items-center">
                               <div><span className="font-bold text-slate-800 text-xs sm:text-sm block">{loc.township}</span><span className="text-[10px] sm:text-xs text-slate-400">{loc.city}</span></div>
-                              <div className="flex gap-1.5">
+                              <div className="flex gap-1.5 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-all">
                                 <button onClick={() => startEditLocation(loc)} className="bg-slate-50 text-slate-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 border border-slate-200"><Pencil size={12}/></button>
                                 <button onClick={() => handleApproveLocation(loc.id)} className="bg-green-50 text-green-600 p-1.5 sm:p-2 rounded-lg hover:bg-green-100 border border-green-200"><CheckCircle2 size={12}/></button>
                                 <button onClick={() => handleDeleteLocation(loc.id)} className="bg-rose-50 text-rose-500 p-1.5 sm:p-2 rounded-lg hover:bg-rose-100 border border-rose-200"><Trash2 size={12}/></button>
@@ -628,8 +715,40 @@ export default function Admin() {
                   <div className="space-y-2">
                     {approvedLocations.map(loc => (
                       <div key={loc.id} className="flex justify-between items-center bg-slate-50 px-3 sm:px-4 py-2.5 sm:py-3 rounded-xl border border-slate-100 group hover:border-slate-200 transition-colors">
-                        <div><span className="font-semibold text-slate-700 text-xs sm:text-sm">{loc.township}</span> <span className="text-[10px] sm:text-xs text-slate-400 ml-1">({loc.city})</span></div>
-                        <button onClick={() => handleDeleteLocation(loc.id)} className="text-slate-300 hover:text-rose-500 p-1 rounded-md opacity-100 sm:opacity-0 group-hover:opacity-100 transition-all"><Trash2 size={14}/></button>
+                        {editingLocId === loc.id ? (
+                          <div className="flex flex-col gap-2.5 w-full">
+                            <div className="flex gap-2">
+                              <input type="text" value={editCity} onChange={e=>setEditCity(e.target.value)} className="w-full p-2 sm:p-2.5 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့အမည်" />
+                              {uniqueCities.length > 0 && (
+                                <select onChange={e => { if(e.target.value) setEditCity(e.target.value); e.target.value=''; }} className="p-2 sm:p-2.5 bg-white border border-slate-200 rounded-lg text-xs outline-none cursor-pointer w-24 sm:w-28 flex-shrink-0 text-slate-600">
+                                  <option value="">ရွေးချယ်ရန်</option>
+                                  {uniqueCities.map((c, i) => <option key={`aec-${i}`} value={c}>{c}</option>)}
+                                </select>
+                              )}
+                            </div>
+                            <div className="flex gap-2">
+                              <input type="text" value={editTownship} onChange={e=>setEditTownship(e.target.value)} className="w-full p-2 sm:p-2.5 bg-white border border-slate-200 rounded-lg text-xs sm:text-sm outline-none" placeholder="မြို့နယ်အမည်" />
+                              {uniqueTownships.length > 0 && (
+                                <select onChange={e => { if(e.target.value) setEditTownship(e.target.value); e.target.value=''; }} className="p-2 sm:p-2.5 bg-white border border-slate-200 rounded-lg text-xs outline-none cursor-pointer w-24 sm:w-28 flex-shrink-0 text-slate-600">
+                                  <option value="">ရွေးချယ်ရန်</option>
+                                  {uniqueTownships.map((t, i) => <option key={`aet-${i}`} value={t}>{t}</option>)}
+                                </select>
+                              )}
+                            </div>
+                            <div className="flex gap-2 mt-1">
+                              <button onClick={() => saveEditedLocation(loc)} className="flex-1 bg-indigo-500 text-white py-2 rounded-lg text-[10px] sm:text-xs font-bold hover:bg-indigo-600 transition-colors">သိမ်းမည်</button>
+                              <button onClick={() => setEditingLocId(null)} className="bg-slate-200 text-slate-600 py-2 px-3 rounded-lg text-[10px] sm:text-xs font-bold hover:bg-slate-300">ပယ်ဖျက်</button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div><span className="font-semibold text-slate-700 text-xs sm:text-sm">{loc.township}</span> <span className="text-[10px] sm:text-xs text-slate-400 ml-1">({loc.city})</span></div>
+                            <div className="flex gap-1.5 opacity-100 lg:opacity-0 group-hover:opacity-100 transition-all">
+                              <button onClick={() => startEditLocation(loc)} className="bg-white text-slate-500 p-1.5 sm:p-2 rounded-lg hover:bg-slate-100 border border-slate-200 shadow-sm"><Pencil size={12}/></button>
+                              <button onClick={() => handleDeleteLocation(loc.id)} className="bg-white text-rose-500 p-1.5 sm:p-2 rounded-lg hover:bg-rose-50 border border-rose-200 shadow-sm"><Trash2 size={12}/></button>
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                     {approvedLocations.length === 0 && <p className="text-[10px] sm:text-xs text-slate-400 text-center py-4">မရှိသေးပါ</p>}
