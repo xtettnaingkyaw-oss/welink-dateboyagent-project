@@ -269,27 +269,31 @@ export default async function handler(req, res) {
       const boy = boySnap.data();
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
 
-      // 🌟 Private Photos / Video ကို Client ဆီ Link များအဖြစ် သေချာစွာ ပြန်ပို့ပေးသည့် အပိုင်း
+      // 🌟 Private Photo/Video များကို Client ဆီ တိုက်ရိုက် ပို့ပေးမည့် အပိုင်း
       if (action === 'APP_P') {
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
         
-        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
-        let videoLinkText = 'မရှိပါ';
+        let base64Count = 0;
+        // ပုံများကို တိုက်ရိုက်ပို့ပါမည်
+        for (let i = 0; i < prPhotos.length; i++) {
+          if (prPhotos[i].startsWith('http')) {
+            try { await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i], protect_content: true }) }); } catch(e) {}
+          } else if (prPhotos[i].startsWith('data:')) base64Count++;
+        }
+        
+        // Video ကို တိုက်ရိုက်ပို့ပါမည်
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
-            const safeVid = boy.privateVideo.replace(/&/g, '&amp;');
-            videoLinkText = `<a href="${safeVid}">Video ကြည့်ရန်</a>`;
+            try { await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo, protect_content: true }) }); } catch(e) {}
           } else {
-            videoLinkText = `<i>(Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ)</i>`;
+            base64Count++;
           }
         }
 
-        const displayLinks = privateLinksText ? `\n\n🔒 <b>Private ဓာတ်ပုံများ:</b> ${privateLinksText}` : "";
-        const displayVideo = boy.privateVideo ? `\n🎬 <b>Video:</b> ${videoLinkText}` : "";
-
+        const noticeText = base64Count > 0 ? `\n\n⚠️ <i>(မှတ်ချက် - Web App မှ တင်ထားသော ပုံ/Video ${base64Count} ခု ပါဝင်နေသဖြင့် Telegram တွင် တိုက်ရိုက်ပြသ၍ မရပါ။ Admin ထံ တောင်းဆိုကြည့်ရှုပါ)</i>` : "";
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
         
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${displayLinks}${displayVideo}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ <b>${boyCode}</b> ၏ Private အချက်အလက်များကို အထက်တွင် ပေးပို့ထားပါသည်။${noticeText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ <b>${boyCode}</b> ၏ Private အချက်အလက်များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -521,7 +525,7 @@ export default async function handler(req, res) {
     }
 
     // ==========================================
-    // 3️⃣ Client Flow
+    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
     // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
@@ -608,7 +612,9 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Webhook Error Details:', error);
+    // 🛡️ Error များအားလုံးကို ဖမ်းယူ၍ User ထံသို့ အတိအကျ ပို့ပေးမည့် အပိုင်း
     if (globalChatId) {
+      // ဤနေရာတွင် Error ကြောင့် Telegram API ထပ်မံမကျရှုံးစေရန် RAW format ဖြင့် ပို့ပါသည်
       await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: globalChatId, text: `⚠️ စနစ်ချို့ယွင်းမှုဖြစ်ပေါ်နေပါသည်။ ခဏစောင့်ပြီး ပြန်လည်ကြိုးစားကြည့်ပါ။\n\n[Error Info: ${error.message}]` }) });
     }
     return res.status(200).json({ error: error.message });
