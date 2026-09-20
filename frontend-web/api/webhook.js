@@ -6,6 +6,12 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 const db = getFirestore(app);
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
+// 🛡️ Data များ Error မတက်စေရန် HTML ဖြင့် ကာကွယ်ပေးသည့် Helper
+function escapeHTML(str) {
+  if (!str) return '';
+  return str.toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
 async function getAdminChatId() {
   const adminDoc = await getDoc(doc(db, 'settings', 'admin_config'));
   return adminDoc.exists() ? adminDoc.data().chatId : null;
@@ -23,9 +29,10 @@ const MAIN_MENU_KEYBOARD = {
   resize_keyboard: true, is_persistent: true
 };
 
+// ⚙️ ပြဿနာမဖြစ်စေရန် parse_mode ကို 'HTML' သို့ ပြောင်းလဲထားပါသည်
 async function sendMessage(chatId, text, replyMarkup = null) {
   try {
-    const body = { chat_id: chatId, text, parse_mode: 'Markdown' };
+    const body = { chat_id: chatId, text, parse_mode: 'HTML', protect_content: true };
     if (replyMarkup) body.reply_markup = replyMarkup;
     await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
   } catch (err) { console.error('SendMessage Error:', err); }
@@ -40,25 +47,22 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
-// 🛡️ Markdown Error မတက်စေရန် အထူးသင်္ကေတများကို ရှင်းလင်းပေးသော Function
-const safeText = (txt) => txt ? String(txt).replace(/[_*\[\]`]/g, ' ') : '';
-
 async function sendDateBoyCard(chatId, boy, boyId) {
   const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
   let validLinks = [];
   for (let i = 0; i < pPhotos.length; i++) {
-    if (pPhotos[i].startsWith('http')) validLinks.push(`[Public ပုံ ${i+1}](${pPhotos[i]})`);
+    if (pPhotos[i].startsWith('http')) validLinks.push(`<a href="${pPhotos[i]}">Public ပုံ ${i+1}</a>`);
   }
-  let publicLinksText = validLinks.length > 0 ? `\n\n📸 *Public ပုံများ:* ${validLinks.join(' | ')}` : "";
-  const caption = `👤 *Code:* ${boyCode}\n🎂 *အသက်:* ${safeText(boy.age)} နှစ်\n📏 *အရပ်:* ${safeText(boy.height)}\n🍆 *Size:* ${safeText(boy.cockSize) || 'N/A'}\n📍 *နေရာ:* ${safeText(boy.township)}, ${safeText(boy.city)}${publicLinksText}`;
+  let publicLinksText = validLinks.length > 0 ? `\n\n📸 <b>Public ပုံများ:</b> ${validLinks.join(' | ')}` : "";
+  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || 'N/A')}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicLinksText}`;
   const keyboard = { inline_keyboard: [[{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }], [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]] };
   await sendMessage(chatId, caption, keyboard);
 }
 
 async function startBotFlow(chatId, stateRef) {
   await setDoc(stateRef, { step: 'CHOOSING_ROLE', data: {} });
-  await sendMessage(chatId, "✨ *WE LINK Dating Agency* မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
+  await sendMessage(chatId, "✨ <b>WE LINK Dating Agency</b> မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
     inline_keyboard: [[{ text: "🔍 Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }], [{ text: "💼 Date Boy လျှောက်မည်", callback_data: "ROLE_APPLICANT" }]]
   });
 }
@@ -66,41 +70,6 @@ async function startBotFlow(chatId, stateRef) {
 export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
-
-    // 🌐 Web Admin မှ Edit လုပ်ပါက Bot (Admin) ဆီသို့ Auto Update ပြပေးမည့်စနစ်
-    if (req.body.internal_action === 'admin_updated_boy') {
-      const adminChatId = await getAdminChatId();
-      if (adminChatId) {
-        const boyId = req.body.boyId;
-        const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
-        const boySnap = await getDoc(doc(db, 'dateboys', boyId));
-        if (boySnap.exists()) {
-          const foundBoy = boySnap.data();
-          const pPhotos = Array.isArray(foundBoy.publicPhotos) ? foundBoy.publicPhotos : [];
-          const prPhotos = Array.isArray(foundBoy.privatePhotos) ? foundBoy.privatePhotos : [];
-          const publicLinks = pPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
-          const privateLinks = prPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
-          const videoLink = foundBoy.privateVideo ? `[Video ကြည့်ရန်](${foundBoy.privateVideo})` : 'မရှိပါ';
-          const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
-
-          const adminMsg = `🔄 *Web Admin မှ အချက်အလက် ပြင်ဆင်ပြီးပါပြီ*\n\n` +
-                           `🆔 *Code:* ${boyCode}\n` +
-                           `👤 *အမည်:* ${safeText(foundBoy.name)}\n` +
-                           `🎂 *အသက်:* ${safeText(foundBoy.age)} နှစ်\n` +
-                           `📏 *အရပ်:* ${safeText(foundBoy.height)} | 🍆 *Size:* ${safeText(foundBoy.cockSize || 'N/A')}\n` +
-                           `📞 *ဖုန်း:* ${safeText(foundBoy.phone)}\n` +
-                           `📍 *မြို့နယ်:* ${safeText(foundBoy.township)}, ${safeText(foundBoy.city)}\n` +
-                           `🏠 *လိပ်စာ အသေးစိတ်:* ${safeText(foundBoy.address)}\n\n` +
-                           `📸 *Public:* ${publicLinks || 'မရှိပါ'}\n` +
-                           `🔒 *Private:* ${privateLinks || 'မရှိပါ'}\n` +
-                           `🎬 *Video:* ${videoLink}\n\n` +
-                           `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${tgLink})\n` +
-                           `📊 *Status:* ${foundBoy.status === 'approved' ? '✅ Approved' : (foundBoy.status === 'hidden' ? '👁️‍🗨️ Hidden' : '⏳ Pending')}`;
-          await sendMessage(adminChatId, adminMsg);
-        }
-      }
-      return res.status(200).json({ status: 'notified' });
-    }
 
     if (req.body.internal_action === 'notify_user') {
       await sendMessage(req.body.chatId, req.body.text, req.body.useMenu ? MAIN_MENU_KEYBOARD : null);
@@ -142,7 +111,8 @@ export default async function handler(req, res) {
 
     const adminChatId = await getAdminChatId();
 
-    if (text.toUpperCase().startsWith('WLDB-')) {
+    // 🔍 Admin မှ Date Boy ကို ID ဖြင့် ရှာဖွေခြင်း (Trim ထည့်သွင်းထားသည်)
+    if (text.toUpperCase().trim().startsWith('WLDB-')) {
       if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
         await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
         return res.status(200).json({ status: 'ok' });
@@ -164,34 +134,34 @@ export default async function handler(req, res) {
       if (foundBoy) {
         const pPhotos = Array.isArray(foundBoy.publicPhotos) ? foundBoy.publicPhotos : [];
         const prPhotos = Array.isArray(foundBoy.privatePhotos) ? foundBoy.privatePhotos : [];
-        const publicLinks = pPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
-        const privateLinks = prPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(' | ');
-        const videoLink = foundBoy.privateVideo ? `[Video ကြည့်ရန်](${foundBoy.privateVideo})` : 'မရှိပါ';
+        const publicLinks = pPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(' | ');
+        const privateLinks = prPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(' | ');
+        const videoLink = foundBoy.privateVideo ? `<a href="${foundBoy.privateVideo}">Video ကြည့်ရန်</a>` : 'မရှိပါ';
         const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
 
-        const adminMsg = `🔍 *Date Boy အချက်အလက် (Admin View)*\n\n` +
-                         `🆔 *Code:* ${searchCode}\n` +
-                         `👤 *အမည်:* ${safeText(foundBoy.name)}\n` +
-                         `🎂 *အသက်:* ${safeText(foundBoy.age)} နှစ်\n` +
-                         `📏 *အရပ်:* ${safeText(foundBoy.height)} | 🍆 *Size:* ${safeText(foundBoy.cockSize || 'N/A')}\n` +
-                         `📞 *ဖုန်း:* ${safeText(foundBoy.phone)}\n` +
-                         `📍 *မြို့နယ်:* ${safeText(foundBoy.township)}, ${safeText(foundBoy.city)}\n` +
-                         `🏠 *လိပ်စာ အသေးစိတ်:* ${safeText(foundBoy.address)}\n\n` +
-                         `📸 *Public:* ${publicLinks || 'မရှိပါ'}\n` +
-                         `🔒 *Private:* ${privateLinks || 'မရှိပါ'}\n` +
-                         `🎬 *Video:* ${videoLink}\n\n` +
-                         `🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${tgLink})\n` +
-                         `📊 *Status:* ${foundBoy.status === 'approved' ? '✅ Approved' : (foundBoy.status === 'hidden' ? '👁️‍🗨️ Hidden' : '⏳ Pending')}`;
+        const adminMsg = `🔍 <b>Date Boy အချက်အလက် (Admin View)</b>\n\n` +
+                         `🆔 <b>Code:</b> ${searchCode}\n` +
+                         `👤 <b>အမည်:</b> ${escapeHTML(foundBoy.name)}\n` +
+                         `🎂 <b>အသက်:</b> ${escapeHTML(foundBoy.age)} နှစ်\n` +
+                         `📏 <b>အရပ်:</b> ${escapeHTML(foundBoy.height)} | 🍆 <b>Size:</b> ${escapeHTML(foundBoy.cockSize || 'N/A')}\n` +
+                         `📞 <b>ဖုန်း:</b> ${escapeHTML(foundBoy.phone)}\n` +
+                         `📍 <b>မြို့နယ်:</b> ${escapeHTML(foundBoy.township)}, ${escapeHTML(foundBoy.city)}\n` +
+                         `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(foundBoy.address)}\n\n` +
+                         `📸 <b>Public:</b> ${publicLinks || 'မရှိပါ'}\n` +
+                         `🔒 <b>Private:</b> ${privateLinks || 'မရှိပါ'}\n` +
+                         `🎬 <b>Video:</b> ${videoLink}\n\n` +
+                         `🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgLink}">ဒီကိုနှိပ်ပါ</a>\n` +
+                         `📊 <b>Status:</b> ${foundBoy.status === 'approved' ? '✅ Approved' : (foundBoy.status === 'hidden' ? '👁️‍🗨️ Hidden' : '⏳ Pending')}`;
         await sendMessage(chatId, adminMsg);
       } else {
-        await sendMessage(chatId, `❌ *${searchCode}* အား စနစ်အတွင်း ရှာမတွေ့ပါ။`);
+        await sendMessage(chatId, `❌ <b>${searchCode}</b> အား စနစ်အတွင်း ရှာမတွေ့ပါ။`);
       }
       return res.status(200).json({ status: 'ok' });
     }
 
     if (text.startsWith('R_R')) {
       const parts = text.split('_');
-      const reasonCode = parts[1];
+      const reasonCode = parts[1]; // R1, R2, R3, R4
       const clientChatId = parts[2];
       const boyId = parts[3];
       
@@ -199,17 +169,18 @@ export default async function handler(req, res) {
       const boyName = boySnap.exists() ? boySnap.data().name : 'Applicant';
 
       let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
-      if (reasonCode === 'R1') reasonMsg += "👉 *သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း*";
-      else if (reasonCode === 'R2') reasonMsg += "👉 *ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း*\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
-      else if (reasonCode === 'R3') reasonMsg += "👉 *ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း*";
+      if (reasonCode === 'R1') reasonMsg += "👉 <b>သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း</b>";
+      else if (reasonCode === 'R2') reasonMsg += "👉 <b>ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း</b>\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
+      else if (reasonCode === 'R3') reasonMsg += "👉 <b>ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း</b>";
       else if (reasonCode === 'R4') reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
       await deleteDoc(doc(db, 'dateboys', boyId));
       await sendMessage(clientChatId, reasonMsg, MAIN_MENU_KEYBOARD);
-      await sendMessage(chatId, `❌ *${safeText(boyName)}* ၏ လျှောက်လွှာကို ပယ်ချပြီး အကြောင်းရင်းကို User ထံ ပို့ပေးလိုက်ပါပြီ။`);
+      await sendMessage(chatId, `❌ <b>${escapeHTML(boyName)}</b> ၏ လျှောက်လွှာကို ပယ်ချပြီး အကြောင်းရင်းကို User ထံ ပို့ပေးလိုက်ပါပြီ။`);
       return res.status(200).json({ status: 'ok' });
     }
 
+    // --- Admin Approvals ---
     if (text.startsWith('APP_') || text.startsWith('REJ_')) {
       const parts = text.split('_');
       const action = parts[0] + '_' + parts[1];
@@ -219,8 +190,8 @@ export default async function handler(req, res) {
       if (action === 'APP_C') {
         const newClientId = `WLC-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
         await setDoc(doc(db, 'client_ids', newClientId), { clientId: newClientId, telegramChatId: clientChatId, status: 'active', createdAt: serverTimestamp() });
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။\n\nသင့်၏ လျှို့ဝှက် Client ID မှာ \`${newClientId}\` ဖြစ်ပါသည်။ (Copy ကူးယူပါ)\n\nDate Boy ရှာဖွေရာတွင် ဤ ID အား အသုံးပြုနိုင်ပါသည်။`, { inline_keyboard: [[{ text: "🔍 ယခု Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }]] });
-        await sendMessage(chatId, `✅ Client ID: *${newClientId}* အား ဖန်တီး၍ Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။\n\nသင့်၏ လျှို့ဝှက် Client ID မှာ <code>${newClientId}</code> ဖြစ်ပါသည်။ (Copy ကူးယူပါ)\n\nDate Boy ရှာဖွေရာတွင် ဤ ID အား အသုံးပြုနိုင်ပါသည်။`, { inline_keyboard: [[{ text: "🔍 ယခု Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }]] });
+        await sendMessage(chatId, `✅ Client ID: <b>${newClientId}</b> အား ဖန်တီး၍ Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
         return res.status(200).json({ status: 'ok' });
       } else if (action === 'REJ_C') {
         await sendMessage(clientChatId, `❌ Client ID ဝယ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -239,41 +210,49 @@ export default async function handler(req, res) {
         for (let i = 0; i < prPhotos.length; i++) {
           if (prPhotos[i].startsWith('http')) {
             await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i] }) });
-          } else { validLinks.push(`[Private ပုံ ${i+1}](${prPhotos[i]})`); }
+          } else {
+            validLinks.push(`<a href="${prPhotos[i]}">Private ပုံ ${i+1}</a>`);
+          }
         }
+        
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
             await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo }) });
-          } else { validLinks.push(`[Private Video](${boy.privateVideo})`); }
+          } else {
+            validLinks.push(`<a href="${boy.privateVideo}">Private Video</a>`);
+          }
         }
-        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 *Private ဓာတ်ပုံများ/Video:* ${validLinks.join(' | ')}` : "";
+
+        let privateLinksText = validLinks.length > 0 ? `\n\n🔒 <b>Private ဓာတ်ပုံများ/Video:</b> ${validLinks.join(' | ')}` : "";
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ *${boyCode}* ၏ Private အချက်အလက်များဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
-        await sendMessage(chatId, `✅ *${boyCode}* ၏ Private ပုံ/Video များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${privateLinksText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        await sendMessage(chatId, `✅ <b>${boyCode}</b> ၏ Private ပုံ/Video များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
-        await sendMessage(clientChatId, `❌ *${boyCode}* ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
+        await sendMessage(clientChatId, `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === 'APP_H') {
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ *${boyCode}* နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`, MAIN_MENU_KEYBOARD);
-        await sendMessage(chatId, `✅ *${boyCode}* နှင့် Dating Request ကို အတည်ပြုပေးလိုက်ပါပြီ။ Client ထံ ဆက်သွယ်ပေးပါ။`);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ <b>${boyCode}</b> နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`, MAIN_MENU_KEYBOARD);
+        await sendMessage(chatId, `✅ <b>${boyCode}</b> နှင့် Dating Request ကို အတည်ပြုပေးလိုက်ပါပြီ။ Client ထံ ဆက်သွယ်ပေးပါ။`);
       } else if (action === 'REJ_H') {
-        await sendMessage(clientChatId, `❌ *${boyCode}* အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
+        await sendMessage(clientChatId, `❌ <b>${boyCode}</b> အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
-      } else if (action === 'APP_D') {
+      } 
+      else if (action === 'APP_D') {
         await updateDoc(doc(db, 'dateboys', boyId), { status: 'approved' });
-        const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: \`${boyCode}\` ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
+        const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
         await sendMessage(clientChatId, approveMsg, MAIN_MENU_KEYBOARD);
-        await sendMessage(chatId, `✅ *${safeText(boy.name)}* ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
-      } else if (action === 'REJ_D') {
+        await sendMessage(chatId, `✅ <b>${escapeHTML(boy.name)}</b> ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
+      } 
+      else if (action === 'REJ_D') {
         const reasonKeyboard = {
           inline_keyboard: [
             [{ text: "⚠️ အရည်အချင်း မကိုက်ညီခြင်း", callback_data: `R_R1_${clientChatId}_${boyId}` }],
-            [{ text: "📸 ပုံ/Video အဆင်မပြေခြင်း", callback_data: `R_R2_${clientChatId}_${boyId}` }],
+            [{ text: "📸 ပုံ/Video အဆင်မပြေခြင်း (ပြန်တင်ရန်)", callback_data: `R_R2_${clientChatId}_${boyId}` }],
             [{ text: "👤 ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း", callback_data: `R_R3_${clientChatId}_${boyId}` }],
             [{ text: "❌ ရိုးရိုးပယ်ချမည်", callback_data: `R_R4_${clientChatId}_${boyId}` }]
           ]
         };
-        await sendMessage(chatId, `ကျေးဇူးပြု၍ *${safeText(boy.name)}* အား ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးချယ်ပေးပါ -`, reasonKeyboard);
+        await sendMessage(chatId, `ကျေးဇူးပြု၍ <b>${escapeHTML(boy.name)}</b> အား ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးချယ်ပေးပါ -`, reasonKeyboard);
       }
       return res.status(200).json({ status: 'ok' });
     }
@@ -288,7 +267,7 @@ export default async function handler(req, res) {
     if (text === '💼 Date Boy လျှောက်မည်') text = 'ROLE_APPLICANT';
     if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
       const config = await getAppConfig();
-      await sendMessage(chatId, `📞 *Admin သို့ ဆက်သွယ်ရန်*\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
+      await sendMessage(chatId, `📞 <b>Admin သို့ ဆက်သွယ်ရန်</b>\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
       return res.status(200).json({ status: 'success' });
     }
 
@@ -298,13 +277,13 @@ export default async function handler(req, res) {
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
         await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
-        await sendMessage(chatId, "🔐 *Date Boy ရှာဖွေရန် Client ID လိုအပ်ပါသည်။*\n\nကျေးဇူးပြု၍ သင့်၏ လျှို့ဝှက် Client ID အား ရိုက်ထည့်ပါ (ဥပမာ - WLC-ABC12) -\n\n(Client ID မရှိသေးပါက အောက်ပါခလုတ်ကို နှိပ်၍ တောင်းဆိုနိုင်ပါသည်။)", {
+        await sendMessage(chatId, "🔐 <b>Date Boy ရှာဖွေရန် Client ID လိုအပ်ပါသည်။</b>\n\nကျေးဇူးပြု၍ သင့်၏ လျှို့ဝှက် Client ID အား ရိုက်ထည့်ပါ (ဥပမာ - WLC-ABC12) -\n\n(Client ID မရှိသေးပါက အောက်ပါခလုတ်ကို နှိပ်၍ တောင်းဆိုနိုင်ပါသည်။)", {
           inline_keyboard: [[{ text: "💳 Admin အား Client ID တောင်းရန်", callback_data: "REQ_CLIENT_ID" }]]
         });
       } else if (text === 'ROLE_APPLICANT') {
         const config = await getAppConfig();
         await setDoc(stateRef, { step: 'APPLICANT_REQUIREMENTS', data: {} });
-        await sendMessage(chatId, `📋 *Date Boy အဖြစ် လျှောက်ထားရန် လိုအပ်သည့်အချက်များ*\n\n${config.reqText}\n\nအထက်ပါ လိုအပ်ချက်များနှင့် ကိုက်ညီပါက အောက်ပါခလုတ်ကို နှိပ်ပါ -`, {
+        await sendMessage(chatId, `📋 <b>Date Boy အဖြစ် လျှောက်ထားရန် လိုအပ်သည့်အချက်များ</b>\n\n${escapeHTML(config.reqText)}\n\nအထက်ပါ လိုအပ်ချက်များနှင့် ကိုက်ညီပါက အောက်ပါခလုတ်ကို နှိပ်ပါ -`, {
           inline_keyboard: [[{ text: "✅ လိုအပ်သည့်အချက်များနှင့် ကိုက်ညီပါသည်", callback_data: "AGREE_REQ" }]]
         });
       }
@@ -314,7 +293,7 @@ export default async function handler(req, res) {
     if (text === 'REQ_CLIENT_ID') {
       const config = await getAppConfig();
       await setDoc(stateRef, { step: 'WAIT_CLIENT_ID_SS', data: {} });
-      await sendMessage(chatId, `💳 Client ID ရယူရန်အတွက် ကျသင့်ငွေမှာ *${config.clientIdFee} ကျပ်* ဖြစ်ပါသည်။\n\nအောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n\`${config.paymentInfo}\`\n\n📸 ပြီးပါက *ငွေလွှဲပြေစာ (Screenshot)* ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
+      await sendMessage(chatId, `💳 Client ID ရယူရန်အတွက် ကျသင့်ငွေမှာ <b>${config.clientIdFee} ကျပ်</b> ဖြစ်ပါသည်။\n\nအောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
       return res.status(200).json({ status: 'success' });
     }
 
@@ -324,9 +303,9 @@ export default async function handler(req, res) {
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-        const adminMsg = `🚨 *New Client ID Request* 🚨\n\nClient: [Profile](${clientProfileLink})\n\nClient မှ ID ဝယ်ယူရန် ငွေလွှဲပြေစာ ပို့ထားပါသည်။ အတည်ပြုပါက ID အလိုအလျောက် ထုတ်ပေးပါမည်။`;
+        const adminMsg = `🚨 <b>New Client ID Request</b> 🚨\n\nClient: <a href="${clientProfileLink}">Profile</a>\n\nClient မှ ID ဝယ်ယူရန် ငွေလွှဲပြေစာ ပို့ထားပါသည်။ အတည်ပြုပါက ID အလိုအလျောက် ထုတ်ပေးပါမည်။`;
         const keyboard = { inline_keyboard: [[{ text: "✅ Approve & Generate ID", callback_data: `APP_C_${chatId}_X` }, { text: "❌ Reject", callback_data: `REJ_C_${chatId}_X` }]] };
-        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'Markdown', reply_markup: keyboard }) });
+        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'HTML', reply_markup: keyboard }) });
       }
       return res.status(200).json({ status: 'success' });
     }
@@ -346,7 +325,7 @@ export default async function handler(req, res) {
         } else {
           const keyboard = cities.map(c => [{ text: `🏙️ ${c}`, callback_data: `CITY_${c}` }]);
           await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: {} });
-          await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော *မြို့* ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
         }
       }
       return res.status(200).json({ status: 'success' });
@@ -358,55 +337,56 @@ export default async function handler(req, res) {
     if (currentState.step === 'APPLICANT_REQUIREMENTS' && text === 'AGREE_REQ') {
       const config = await getAppConfig();
       await setDoc(stateRef, { step: 'APPLICANT_RULES', data: {} });
-      await sendMessage(chatId, `⚖️ *Date Boy လျှောက်ထားခြင်းအတွက် စည်းမျဉ်းစည်းကမ်းများ*\n\n${config.ruleText}\n\nသဘောတူညီပါက အောက်ပါခလုတ်ကို နှိပ်ပါ -`, { inline_keyboard: [[{ text: "✅ သဘောတူပါသည် (စတင်မည်)", callback_data: "AGREE_RULES" }]] });
+      await sendMessage(chatId, `⚖️ <b>Date Boy လျှောက်ထားခြင်းအတွက် စည်းမျဉ်းစည်းကမ်းများ</b>\n\n${escapeHTML(config.ruleText)}\n\nသဘောတူညီပါက အောက်ပါခလုတ်ကို နှိပ်ပါ -`, {
+        inline_keyboard: [[{ text: "✅ သဘောတူပါသည် (စတင်မည်)", callback_data: "AGREE_RULES" }]]
+      });
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'APPLICANT_RULES' && text === 'AGREE_RULES') {
       await setDoc(stateRef, { step: 'GET_NAME', data: {} });
-      await sendMessage(chatId, "✍️ ကျေးဇူးပြု၍ သင့်ရဲ့ *အမည်* ကို ရိုက်ထည့်ပေးပါ:");
+      await sendMessage(chatId, "✍️ ကျေးဇူးပြု၍ သင့်ရဲ့ <b>အမည်</b> ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_NAME' && text) {
       await setDoc(stateRef, { step: 'GET_AGE', data: { ...currentState.data, name: text } });
-      await sendMessage(chatId, "🎂 ကျေးဇူးပြု၍ သင့်ရဲ့ *အသက်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ၂၅):");
+      await sendMessage(chatId, "🎂 ကျေးဇူးပြု၍ သင့်ရဲ့ <b>အသက်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ၂၅):");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_AGE' && text) {
       await setDoc(stateRef, { step: 'GET_HEIGHT', data: { ...currentState.data, age: text } });
-      await sendMessage(chatId, "📏 ကျေးဇူးပြု၍ သင့်ရဲ့ *အရပ်အမြင့်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - 5' 9\"):");
+      await sendMessage(chatId, "📏 ကျေးဇူးပြု၍ သင့်ရဲ့ <b>အရပ်အမြင့်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - 5' 9\"):");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_HEIGHT' && text) {
       await setDoc(stateRef, { step: 'GET_COCK_SIZE', data: { ...currentState.data, height: text } });
-      await sendMessage(chatId, "🍆 ကျေးဇူးပြု၍ သင့်ရဲ့ *အရွယ်အစား (Cock Size)* ကို လက်မဖြင့် ရိုက်ထည့်ပေးပါ (ဥပမာ - 6\"):");
+      await sendMessage(chatId, "🍆 ကျေးဇူးပြု၍ သင့်ရဲ့ <b>အရွယ်အစား (Cock Size)</b> ကို လက်မဖြင့် ရိုက်ထည့်ပေးပါ (ဥပမာ - 6\"):");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_COCK_SIZE' && text) {
       await setDoc(stateRef, { step: 'GET_PHONE', data: { ...currentState.data, cockSize: text } });
-      await sendMessage(chatId, "📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် *ဖုန်းနံပါတ်* ကို ရိုက်ထည့်ပေးပါ:");
+      await sendMessage(chatId, "📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် <b>ဖုန်းနံပါတ်</b> ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_PHONE' && text) {
       await setDoc(stateRef, { step: 'GET_CITY', data: { ...currentState.data, phone: text } });
-      await sendMessage(chatId, "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ *မြို့* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - မန္တလေး):");
+      await sendMessage(chatId, "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ <b>မြို့</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - မန္တလေး):");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_CITY' && text) {
       await setDoc(stateRef, { step: 'GET_TOWNSHIP', data: { ...currentState.data, city: text } });
-      await sendMessage(chatId, "📍 ကျေးဇူးပြု၍ နေထိုင်ရာ *မြို့နယ်* ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ချမ်းအေးသာစံ):");
+      await sendMessage(chatId, "📍 ကျေးဇူးပြု၍ နေထိုင်ရာ <b>မြို့နယ်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ချမ်းအေးသာစံ):");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_TOWNSHIP' && text) {
       await setDoc(stateRef, { step: 'GET_ADDRESS', data: { ...currentState.data, township: text } });
-      await sendMessage(chatId, "🏠 ကျေးဇူးပြု၍ *နေရပ်လိပ်စာ အသေးစိတ်* ကို ရိုက်ထည့်ပေးပါ:");
+      await sendMessage(chatId, "🏠 ကျေးဇူးပြု၍ <b>နေရပ်လိပ်စာ အသေးစိတ်</b> ကို ရိုက်ထည့်ပေးပါ:");
       return res.status(200).json({ status: 'success' });
     }
     if (currentState.step === 'GET_ADDRESS' && text) {
       await setDoc(stateRef, { step: 'GET_PUBLIC_PHOTOS', data: { ...currentState.data, address: text, publicPhotos: [] } });
-      await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် *အလှဓာတ်ပုံ (၃) ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
+      await sendMessage(chatId, "📸 ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် <b>အလှဓာတ်ပုံ (၃) ပုံ</b> ကို တစ်ပုံချင်းစီ ပို့ပေးပါ\n\n(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_PUBLIC_PHOTOS') {
       const currentPublic = currentState.data.publicPhotos || [];
       if (photos.length > 0) {
@@ -417,11 +397,10 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `📸 အလှဓာတ်ပုံ ${currentPublic.length}/3 ပုံ ရရှိပြီ။ နောက်ထပ် ပုံ ပို့ပေးပါဦး။`);
       } else {
         await setDoc(stateRef, { step: 'GET_PRIVATE_PHOTOS', data: { ...currentState.data, publicPhotos: currentPublic, privatePhotos: [] } });
-        await sendMessage(chatId, "✅ အလှဓာတ်ပုံ ၃ ပုံ ရရှိပါပြီ။\n\n🔒 ယခု အရွယ်အစား အမှန်အကန်ကို သေချာမြင်ရသော *ပစ္စည်းပုံ (Cock Photo) ၃ ပုံ* ကို တစ်ပုံချင်းစီ ပို့ပေးပါ။\n\n🔒(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
+        await sendMessage(chatId, "✅ အလှဓာတ်ပုံ ၃ ပုံ ရရှိပါပြီ။\n\n🔒 ယခု အရွယ်အစား အမှန်အကန်ကို သေချာမြင်ရသော <b>ပစ္စည်းပုံ (Cock Photo) ၃ ပုံ</b> ကို တစ်ပုံချင်းစီ ပို့ပေးပါ။\n\n🔒(အခု ပထမဆုံးတစ်ပုံအရင်ပို့ပါ):");
       }
       return res.status(200).json({ status: 'success' });
     }
-
     if (currentState.step === 'GET_PRIVATE_PHOTOS') {
       const currentPrivate = currentState.data.privatePhotos || [];
       if (photos.length > 0) {
@@ -470,10 +449,22 @@ export default async function handler(req, res) {
       
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
-        const publicLinks = applicantData.publicPhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
-        const privateLinks = applicantData.privatePhotos.map((url, i) => `[ပုံ ${i+1}](${url})`).join(', ');
-        const videoLink = `[Video ကြည့်ရန်](${privateVideoUrl})`;
-        const adminMsg = `🚨 *New Date Boy Registration* 🚨\n\n👤 *အမည်:* ${safeText(finalData.name)}\n🎂 *အသက်:* ${safeText(finalData.age)} နှစ်\n📏 *အရပ်:* ${safeText(finalData.height)} | 🍆 *Size:* ${safeText(finalData.cockSize)}\n📞 *ဖုန်း:* ${safeText(finalData.phone)}\n📍 *မြို့နယ်:* ${safeText(finalData.township)}, ${safeText(finalData.city)}\n🏠 *လိပ်စာ အသေးစိတ်:* ${safeText(finalData.address)}\n\n📸 *Public:* ${publicLinks}\n🔒 *Private:* ${privateLinks}\n🎬 *Video:* ${videoLink}\n\n🔗 *Telegram ဖြင့် ဆက်သွယ်ရန်:* [ဒီကိုနှိပ်ပါ](${telegramProfileLink})`;
+        const publicLinks = applicantData.publicPhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(', ');
+        const privateLinks = applicantData.privatePhotos.map((url, i) => `<a href="${url}">ပုံ ${i+1}</a>`).join(', ');
+        const videoLink = `<a href="${privateVideoUrl}">Video ကြည့်ရန်</a>`;
+        
+        const adminMsg = `🚨 <b>New Date Boy Registration</b> 🚨\n\n` +
+                         `👤 <b>အမည်:</b> ${escapeHTML(finalData.name)}\n` +
+                         `🎂 <b>အသက်:</b> ${escapeHTML(finalData.age)} နှစ်\n` +
+                         `📏 <b>အရပ်:</b> ${escapeHTML(finalData.height)} | 🍆 <b>Size:</b> ${escapeHTML(finalData.cockSize)}\n` +
+                         `📞 <b>ဖုန်း:</b> ${escapeHTML(finalData.phone)}\n` +
+                         `📍 <b>မြို့နယ်:</b> ${escapeHTML(finalData.township)}, ${escapeHTML(finalData.city)}\n` +
+                         `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(finalData.address)}\n\n` +
+                         `📸 <b>Public:</b> ${publicLinks}\n` +
+                         `🔒 <b>Private:</b> ${privateLinks}\n` +
+                         `🎬 <b>Video:</b> ${videoLink}\n\n` +
+                         `🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${telegramProfileLink}">ဒီကိုနှိပ်ပါ</a>`;
+                         
         const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `APP_D_${chatId}_${docRef.id}` }, { text: "❌ Reject", callback_data: `REJ_D_${chatId}_${docRef.id}` }]] };
         await sendMessage(adminChatId, adminMsg, keyboard);
       }
@@ -482,6 +473,9 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
+    // ==========================================
+    // 3️⃣ Client Flow
+    // ==========================================
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITY_')) {
       const selectedCity = text.replace('CITY_', '');
       const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'), where('city', '==', selectedCity));
@@ -490,7 +484,7 @@ export default async function handler(req, res) {
       const keyboard = townships.map(t => [{ text: `📍 ${t}`, callback_data: `TOWNSHIP_${t}` }]);
       keyboard.unshift([{ text: "🌐 မြို့နယ်အားလုံးပြရန်", callback_data: `TOWNSHIP_ALL_${selectedCity}` }]);
       await setDoc(stateRef, { step: 'CLIENT_SELECT_TOWNSHIP', data: {} });
-      await sendMessage(chatId, `🔍 ${selectedCity} တွင် ရှာဖွေလိုသော *မြို့နယ်* ကို ရွေးချယ်ပါ -`, { inline_keyboard: keyboard });
+      await sendMessage(chatId, `🔍 ${escapeHTML(selectedCity)} တွင် ရှာဖွေလိုသော <b>မြို့နယ်</b> ကို ရွေးချယ်ပါ -`, { inline_keyboard: keyboard });
       return res.status(200).json({ status: 'success' });
     }
 
@@ -509,7 +503,7 @@ export default async function handler(req, res) {
       if (snap.empty) {
         await sendMessage(chatId, `⚠️ ဤနေရာတွင် Date Boy မရှိသေးပါ။ /start ဖြင့် အခြားနေရာ ပြောင်းရှာပါ။`, MAIN_MENU_KEYBOARD);
       } else {
-        await sendMessage(chatId, `✨ *${titleMsg}* တွင် ရရှိနိုင်သော Date Boy (${snap.size} ယောက်):`);
+        await sendMessage(chatId, `✨ <b>${escapeHTML(titleMsg)}</b> တွင် ရရှိနိုင်သော Date Boy (${snap.size} ယောက်):`);
         for (const dDoc of snap.docs) { await sendDateBoyCard(chatId, dDoc.data(), dDoc.id); }
         await sendMessage(chatId, "🔄 ထပ်မံရှာဖွေလိုပါက အောက်ပါ Menu ကို အသုံးပြုပါ။", MAIN_MENU_KEYBOARD);
       }
@@ -521,7 +515,7 @@ export default async function handler(req, res) {
       const boyId = text.replace('REQ_P_', '');
       const config = await getAppConfig();
       await setDoc(stateRef, { step: 'WAIT_PRIV_SS', data: { boyId } });
-      await sendMessage(chatId, `🔒 Private ပုံများ ကြည့်ရှုခွင့်အတွက် ကျသင့်ငွေမှာ *${config.privFee} ကျပ်* ဖြစ်ပါသည်။\n\n💳 အောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n\`${config.paymentInfo}\`\n\n📸 ပြီးပါက *ငွေလွှဲပြေစာ (Screenshot)* ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
+      await sendMessage(chatId, `🔒 Private ပုံများ ကြည့်ရှုခွင့်အတွက် ကျသင့်ငွေမှာ <b>${config.privFee} ကျပ်</b> ဖြစ်ပါသည်။\n\n💳 အောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
       return res.status(200).json({ status: 'success' });
     }
 
@@ -533,9 +527,9 @@ export default async function handler(req, res) {
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-        const adminMsg = `🚨 *Private Photo Request* 🚨\n\nCode: *${boyCode}*\nClient: [Profile](${clientProfileLink})\n\nClient မှ ငွေလွှဲပြေစာ ပို့ထားပါသည်။`;
+        const adminMsg = `🚨 <b>Private Photo Request</b> 🚨\n\nCode: <b>${boyCode}</b>\nClient: <a href="${clientProfileLink}">Profile</a>\n\nClient မှ ငွေလွှဲပြေစာ ပို့ထားပါသည်။`;
         const keyboard = { inline_keyboard: [[{ text: "✅ Approve", callback_data: `APP_P_${chatId}_${boyId}` }, { text: "❌ Reject", callback_data: `REJ_P_${chatId}_${boyId}` }]] };
-        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'Markdown', reply_markup: keyboard }) });
+        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'HTML', reply_markup: keyboard }) });
       }
       return res.status(200).json({ status: 'success' });
     }
@@ -544,7 +538,7 @@ export default async function handler(req, res) {
       const boyId = text.replace('REQ_H_', '');
       const config = await getAppConfig();
       await setDoc(stateRef, { step: 'WAIT_HIRE_SS', data: { boyId } });
-      await sendMessage(chatId, `❤️ Date Boy ခေါ်ယူခြင်းအတွက် ဈေးနှုန်းများမှာ အောက်ပါအတိုင်းဖြစ်ပါသည် -\n\n🕒 Section: ${config.feeSec} ကျပ်\n☀️ Day: ${config.feeDay} ကျပ်\n🌙 Night: ${config.feeNight} ကျပ်\n\n💳 Booking တင်ရန်အတွက် စရံငွေ (၅၀%) ကို အောက်ပါအကောင့်သို့ လွှဲပေးပါ -\n\`${config.paymentInfo}\`\n\n📸 ပြီးပါက *ငွေလွှဲပြေစာ (Screenshot)* ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
+      await sendMessage(chatId, `❤️ Date Boy ခေါ်ယူခြင်းအတွက် ဈေးနှုန်းများမှာ အောက်ပါအတိုင်းဖြစ်ပါသည် -\n\n🕒 Section: ${config.feeSec} ကျပ်\n☀️ Day: ${config.feeDay} ကျပ်\n🌙 Night: ${config.feeNight} ကျပ်\n\n💳 Booking တင်ရန်အတွက် စရံငွေ (၅၀%) ကို အောက်ပါအကောင့်သို့ လွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
       return res.status(200).json({ status: 'success' });
     }
 
@@ -556,9 +550,9 @@ export default async function handler(req, res) {
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
         const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-        const adminMsg = `🚨 *Dating Request (Booking)* 🚨\n\nDate Boy: *${boyCode}*\nClient: [Profile](${clientProfileLink})\n\nClient မှ Booking စရံပြေစာ ပို့ထားပါသည်။`;
+        const adminMsg = `🚨 <b>Dating Request (Booking)</b> 🚨\n\nDate Boy: <b>${boyCode}</b>\nClient: <a href="${clientProfileLink}">Profile</a>\n\nClient မှ Booking စရံပြေစာ ပို့ထားပါသည်။`;
         const keyboard = { inline_keyboard: [[{ text: "✅ Approve Hire", callback_data: `APP_H_${chatId}_${boyId}` }, { text: "❌ Reject", callback_data: `REJ_H_${chatId}_${boyId}` }]] };
-        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'Markdown', reply_markup: keyboard }) });
+        await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'HTML', reply_markup: keyboard }) });
       }
       return res.status(200).json({ status: 'success' });
     }
