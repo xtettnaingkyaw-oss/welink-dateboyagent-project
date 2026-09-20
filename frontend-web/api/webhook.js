@@ -6,11 +6,13 @@ const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApps()[0
 const db = getFirestore(app);
 const TELEGRAM_API = `https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}`;
 
+// 🛡️ စာသားများ Error မတက်စေရန် Helper
 function escapeHTML(str) {
   if (!str) return '';
   return str.toString().replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 
+// 🛡️ လင့်ခ်များ ပျောက်မသွားစေရန် Helper
 function processMediaLinks(mediaArray, typeLabel) {
   if (!Array.isArray(mediaArray)) return "";
   let validLinks = [];
@@ -26,7 +28,7 @@ function processMediaLinks(mediaArray, typeLabel) {
   let resultText = validLinks.length > 0 ? validLinks.join(' | ') : "";
   if (base64Count > 0) {
     resultText += resultText ? ` | ` : "";
-    resultText += `<i>(Web မှတင်ထားသော ပုံ ${base64Count} ပုံ ပါဝင်သည်။ Admin အား တောင်းဆိုပါ)</i>`;
+    resultText += `<i>(Web မှတင်ထားသော ${typeLabel} ${base64Count} ခု ပါဝင်သည်။ Admin အား တောင်းဆိုပါ)</i>`;
   }
   return resultText;
 }
@@ -50,14 +52,11 @@ const MAIN_MENU_KEYBOARD = {
 };
 
 async function sendMessage(chatId, text, replyMarkup = null) {
-  const body = { chat_id: chatId, text, parse_mode: 'HTML', protect_content: true };
-  if (replyMarkup) body.reply_markup = replyMarkup;
-  const res = await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-  const data = await res.json();
-  if (!data.ok) {
-    console.error("Telegram Error:", data);
-    throw new Error(`Telegram API Error: ${data.description}`);
-  }
+  try {
+    const body = { chat_id: chatId, text, parse_mode: 'HTML', protect_content: true };
+    if (replyMarkup) body.reply_markup = replyMarkup;
+    await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  } catch (err) { console.error('SendMessage Error:', err); }
 }
 
 async function getTelegramFileUrl(fileId) {
@@ -129,7 +128,7 @@ export default async function handler(req, res) {
     const stateRef = doc(db, 'telegram_states', String(chatId));
 
     if (text === '/ping') {
-      await sendMessage(chatId, "✅ Webhook is running (Bulletproof Unicode Version)!");
+      await sendMessage(chatId, "✅ Webhook is running (Private Links Fix Version)!");
       return res.status(200).json({ status: 'success' });
     }
 
@@ -143,30 +142,32 @@ export default async function handler(req, res) {
     const cleanText = text.replace(/[\u2010-\u2015]/g, '-').replace(/[\u200B-\u200D\uFEFF]/g, '');
     const inputText = cleanText.toUpperCase().replace(/\s+/g, '');
 
-    // 🚀 Client ID ကို Auto Detect လုပ်သည့် အပိုင်း (Error 400 Bad Request ကို လုံးဝဖြေရှင်းထားပါသည်)
+    // 🚀 Client ID ကို Auto Detect လုပ်သည့် အပိုင်း
     if (inputText.startsWith('WLC-')) {
-      const clientDoc = await getDoc(doc(db, 'client_ids', inputText));
-      
-      if (!clientDoc.exists()) {
-        await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ မှားယွင်းနေပါသည် (ရှာမတွေ့ပါ)။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။`);
-      } else if (clientDoc.data().status !== 'active') {
-        await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ သက်တမ်းကုန်ဆုံးသွားပါပြီ။`);
-      } else {
-        const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-        const snap = await getDocs(q);
-        const cities = [...new Set(snap.docs.map(d => (d.data().city || "").trim()).filter(Boolean))];
+      try {
+        const clientDoc = await getDoc(doc(db, 'client_ids', inputText));
         
-        if (cities.length === 0) {
-          await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
-          await setDoc(stateRef, { step: 'IDLE', data: {} });
+        if (!clientDoc.exists()) {
+          await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ မှားယွင်းနေပါသည် (ရှာမတွေ့ပါ)။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။`);
+        } else if (clientDoc.data().status !== 'active') {
+          await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ သက်တမ်းကုန်ဆုံးသွားပါပြီ။`);
         } else {
-          // 🚀 64 Bytes ကျော်လွန်သည့် ပြဿနာကို ဖြေရှင်းရန်၊ City အမည်များအစား Index (0, 1, 2) များကိုသာ ခလုတ်တွင် သုံးပါသည်
-          const keyboard = cities.map((c, index) => [{ text: `🏙️ ${c}`, callback_data: `CITYIDX_${index}` }]);
+          const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
+          const snap = await getDocs(q);
+          const cities = [...new Set(snap.docs.map(d => (d.data().city || "").trim()).filter(Boolean))];
           
-          // Database တွင် Index နှင့် City အမည်များကို တွဲ၍ မှတ်သားထားပါမည်
-          await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: { availableCities: cities } });
-          await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          if (cities.length === 0) {
+            await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
+            await setDoc(stateRef, { step: 'IDLE', data: {} });
+          } else {
+            const keyboard = cities.map((c, index) => [{ text: `🏙️ ${c}`, callback_data: `CITYIDX_${index}` }]);
+            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: { availableCities: cities } });
+            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+          }
         }
+      } catch (err) {
+        console.error("Client ID Error:", err);
+        await sendMessage(chatId, `⚠️ Client ID စစ်ဆေးရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။ (${err.message})`);
       }
       return res.status(200).json({ status: 'success' });
     }
@@ -268,28 +269,29 @@ export default async function handler(req, res) {
       const boy = boySnap.data();
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
 
+      // 🌟 Private Photos & Videos ပြဿနာ ဖြေရှင်းထားသည့် အပိုင်း (Link အဖြစ်သာ ပို့ပါမည်)
       if (action === 'APP_P') {
         const prPhotos = Array.isArray(boy.privatePhotos) ? boy.privatePhotos : (boy.privatePhotos ? [boy.privatePhotos] : []);
-        let base64Count = 0;
         
-        for (let i = 0; i < prPhotos.length; i++) {
-          if (prPhotos[i].startsWith('http')) {
-            try { await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, photo: prPhotos[i], protect_content: true }) }); } catch(e) {}
-          } else if (prPhotos[i].startsWith('data:')) base64Count++;
-        }
+        // Private ပုံများကို Link အဖြစ် ပြောင်းခြင်း
+        const privateLinksText = processMediaLinks(prPhotos, "Private ပုံ");
         
+        // Video ကို Link အဖြစ် ပြောင်းခြင်း
+        let videoLinkText = "";
         if (boy.privateVideo) {
           if (boy.privateVideo.startsWith('http')) {
-            try { await fetch(`${TELEGRAM_API}/sendVideo`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: clientChatId, video: boy.privateVideo, protect_content: true }) }); } catch(e) {}
+            const safeVid = boy.privateVideo.replace(/&/g, '&amp;');
+            videoLinkText = `\n🎬 <b>Video:</b> <a href="${safeVid}">Video ကြည့်ရန်</a>`;
           } else {
-            base64Count++;
+            videoLinkText = `\n🎬 <i>(Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ)</i>`;
           }
         }
 
-        const noticeText = base64Count > 0 ? `\n\n⚠️ <i>(မှတ်ချက် - Web App မှ တင်ထားသော ပုံ/Video ${base64Count} ခု ပါဝင်နေသဖြင့် Telegram တွင် တိုက်ရိုက်ပြသ၍ မရပါ။ Admin ထံ တောင်းဆိုကြည့်ရှုပါ)</i>` : "";
+        const displayLinks = privateLinksText ? `\n\n🔒 <b>Private ဓာတ်ပုံများ:</b> ${privateLinksText}` : "";
+        
         const nextActionKeyboard = { inline_keyboard: [[{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }], [{ text: "🔄 နောက်တစ်ယောက် ထပ်ရှာမည်", callback_data: "ROLE_CLIENT" }]] };
         
-        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ <b>${boyCode}</b> ၏ Private အချက်အလက်များကို အထက်တွင် ပေးပို့ထားပါသည်။${noticeText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
+        await sendMessage(clientChatId, `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ ဤသည်မှာ <b>${boyCode}</b> ၏ Private အချက်အလက်များဖြစ်ပါသည်-${displayLinks}${videoLinkText}\n\nယခု Date Boy အား ခေါ်ယူလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ။`, nextActionKeyboard);
         await sendMessage(chatId, `✅ <b>${boyCode}</b> ၏ Private အချက်အလက်များကို Client ထံ ပို့ပေးလိုက်ပါပြီ။`);
       } else if (action === 'REJ_P') {
         await sendMessage(clientChatId, `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`);
@@ -321,7 +323,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
-    // Menu Navigation Commands
     if (text === '🔄 အစသို့ ပြန်သွားမည်' || text === '/start' || text === 'RESET') {
       await sendMessage(chatId, "ပင်မ စာမျက်နှာသို့ ပြန်သွားနေပါသည်...", MAIN_MENU_KEYBOARD);
       await startBotFlow(chatId, stateRef);
@@ -522,19 +523,16 @@ export default async function handler(req, res) {
     }
 
     // ==========================================
-    // 3️⃣ Client Flow (မြို့ရွေး ➡️ မြို့နယ်ရွေး ➡️ Date Boy ပြသ ➡️ Payment)
+    // 3️⃣ Client Flow
     // ==========================================
-    
-    // 🚀 City Selection မှာ Error (64 Byte Limit) ကို အပြည့်အဝ ဖြေရှင်းထားသည့် အပိုင်း
     if (currentState.step === 'CLIENT_SELECT_CITY' && text.startsWith('CITYIDX_')) {
       const cityIndex = parseInt(text.replace('CITYIDX_', ''));
-      const selectedCity = currentState.data.availableCities[cityIndex]; // Database မှ ပြန်လည်ဆွဲယူခြင်း
+      const selectedCity = currentState.data.availableCities[cityIndex]; 
       
       const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'), where('city', '==', selectedCity));
       const snap = await getDocs(q);
       const townships = [...new Set(snap.docs.map(d => d.data().township))];
       
-      // Township များကိုလည်း Index ဖြင့်သာ မှတ်သားပါမည်
       const keyboard = townships.map((t, idx) => [{ text: `📍 ${t}`, callback_data: `TSPIDX_${idx}` }]);
       keyboard.unshift([{ text: "🌐 မြို့နယ်အားလုံးပြရန်", callback_data: `TSPIDX_ALL` }]);
       
@@ -543,7 +541,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
-    // 🚀 Township Selection မှာ Error (64 Byte Limit) ကို အပြည့်အဝ ဖြေရှင်းထားသည့် အပိုင်း
     if (currentState.step === 'CLIENT_SELECT_TOWNSHIP' && text.startsWith('TSPIDX_')) {
       let q, titleMsg = "";
       const selectedCity = currentState.data.selectedCity;
@@ -620,7 +617,6 @@ export default async function handler(req, res) {
 
   } catch (error) {
     console.error('Webhook Error Details:', error);
-    // 🛡️ Error များအားလုံးကို ဖမ်းယူ၍ User ထံသို့ အတိအကျ ပို့ပေးမည့် အပိုင်း
     if (globalChatId) {
       await fetch(`${TELEGRAM_API}/sendMessage`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: globalChatId, text: `⚠️ စနစ်ချို့ယွင်းမှုဖြစ်ပေါ်နေပါသည်။ ခဏစောင့်ပြီး ပြန်လည်ကြိုးစားကြည့်ပါ။\n\n[Error Info: ${error.message}]` }) });
     }
