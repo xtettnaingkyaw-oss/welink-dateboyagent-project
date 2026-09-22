@@ -66,7 +66,6 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
-// 🛡️ User ကို Reject လုပ်ပြီး Ban မှတ်တမ်းတင်မည့် Helper Function
 async function handleUserRejection(clientChatId, reasonMsg, telegramProfileLink) {
   const stateRef = doc(db, 'telegram_states', String(clientChatId));
   const stateSnap = await getDoc(stateRef);
@@ -94,6 +93,25 @@ async function handleUserRejection(clientChatId, reasonMsg, telegramProfileLink)
   }
   
   await sendMessage(clientChatId, finalMessage, MAIN_MENU_KEYBOARD);
+}
+
+async function sendDateBoyCard(chatId, boy, boyId) {
+  const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+  const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
+  
+  const publicLinksText = processMediaLinks(pPhotos, "Public ပုံ");
+  const publicDisplay = publicLinksText ? `\n\n📸 <b>Public ပုံများ:</b> ${publicLinksText}` : "";
+
+  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || 'N/A')}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicDisplay}`;
+  const keyboard = { inline_keyboard: [[{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }], [{ text: "❤️ ခေါ်ယူမည် (Hire)", callback_data: `REQ_H_${boyId}` }]] };
+  await sendMessage(chatId, caption, keyboard);
+}
+
+async function startBotFlow(chatId, stateRef) {
+  await setDoc(stateRef, { step: 'CHOOSING_ROLE', data: {} }, { merge: true });
+  await sendMessage(chatId, "✨ <b>WE LINK Dating Agency</b> မှ ကြိုဆိုပါတယ်ခင်ဗျာ! \n\nကျေးဇူးပြု၍ လိုချင်သော ဝန်ဆောင်မှုကို ရွေးချယ်ပေးပါ -", {
+    inline_keyboard: [[{ text: "🔍 Date Boy ရှာမည်", callback_data: "ROLE_CLIENT" }], [{ text: "💼 Date Boy လျှောက်မည်", callback_data: "ROLE_APPLICANT" }]]
+  });
 }
 
 export default async function handler(req, res) {
@@ -140,10 +158,10 @@ export default async function handler(req, res) {
 
     if (!chatId) return res.status(200).json({ status: 'No chatId' });
     const stateRef = doc(db, 'telegram_states', String(chatId));
-    const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
 
+    // 🚀 ၁။ Commands များနှင့် Menu ခလုတ်များကို အရင်ဆုံး စစ်ဆေးပါမည်
     if (text === '/ping') {
-      await sendMessage(chatId, "✅ Webhook is running (Ban & Custom Reject System)!");
+      await sendMessage(chatId, "✅ Webhook is running (Menu Button Fix Version)!");
       return res.status(200).json({ status: 'success' });
     }
 
@@ -153,13 +171,29 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'success' });
     }
 
+    // 🚀 Emoji နှင့် Space ပြဿနာများကို ဖြေရှင်းရန် includes ဖြင့် စစ်ဆေးခြင်း
+    if (text === '/start' || text === 'RESET' || text.includes('အစသို့ ပြန်သွားမည်')) {
+      await sendMessage(chatId, "ပင်မ စာမျက်နှာသို့ ပြန်သွားနေပါသည်...", MAIN_MENU_KEYBOARD);
+      await startBotFlow(chatId, stateRef);
+      return res.status(200).json({ status: 'success' });
+    }
+    
+    if (text.includes('Date Boy ထပ်ရှာမည်')) text = 'ROLE_CLIENT';
+    if (text.includes('Date Boy လျှောက်မည်')) text = 'ROLE_APPLICANT';
+    if (text.includes('Admin သို့ ဆက်သွယ်ရန်')) {
+      const config = await getAppConfig();
+      await sendMessage(chatId, `📞 <b>Admin သို့ ဆက်သွယ်ရန်</b>\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
+      return res.status(200).json({ status: 'success' });
+    }
+
+
+    // 🚀 ၂။ Text Prefixes များကို စစ်ဆေးပါမည်
     const cleanText = text.replace(/[\u2010-\u2015]/g, '-').replace(/[\u200B-\u200D\uFEFF]/g, '');
     const inputText = cleanText.toUpperCase().replace(/\s+/g, '');
 
     if (inputText.startsWith('WLC-')) {
       try {
         const clientDoc = await getDoc(doc(db, 'client_ids', inputText));
-        
         if (!clientDoc.exists()) {
           await sendMessage(chatId, `❌ သင့်၏ Client ID (${inputText}) မှာ မှားယွင်းနေပါသည် (ရှာမတွေ့ပါ)။ ကျေးဇူးပြု၍ ပြန်လည်စစ်ဆေးပါ။`);
         } else if (clientDoc.data().status !== 'active') {
@@ -168,10 +202,9 @@ export default async function handler(req, res) {
           const q = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
           const snap = await getDocs(q);
           const cities = [...new Set(snap.docs.map(d => (d.data().city || "").trim()).filter(Boolean))];
-          
           if (cities.length === 0) {
             await sendMessage(chatId, "⚠️ လောလောဆယ် ရရှိနိုင်သော Date Boy များ မရှိသေးပါ။", MAIN_MENU_KEYBOARD);
-            await setDoc(stateRef, { step: 'IDLE', data: {} });
+            await setDoc(stateRef, { step: 'IDLE', data: {} }, { merge: true });
           } else {
             const keyboard = cities.map((c, index) => [{ text: `🏙️ ${c}`, callback_data: `CITYIDX_${index}` }]);
             await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: { availableCities: cities } }, { merge: true });
@@ -211,8 +244,7 @@ export default async function handler(req, res) {
           if (foundBoy.privateVideo.startsWith('http')) {
             const safeVid = foundBoy.privateVideo.replace(/&/g, '&amp;');
             videoLink = `<a href="${safeVid}">Video ကြည့်ရန်</a>`;
-          }
-          else videoLink = `<i>Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ</i>`;
+          } else videoLink = `<i>Web မှတင်ထားသော Video ဖြစ်သဖြင့် တိုက်ရိုက်ပြ၍ မရပါ</i>`;
         }
 
         const tgLink = foundBoy.telegramProfileLink || `tg://user?id=${foundBoy.telegramChatId}`;
@@ -248,7 +280,7 @@ export default async function handler(req, res) {
       const tgLink = boySnap.exists() ? boySnap.data().telegramProfileLink : `tg://user?id=${clientChatId}`;
 
       if (reasonCode === 'R5') {
-        await setDoc(stateRef, { step: 'WAIT_CUSTOM_REASON', data: { clientChatId, boyId, boyName, tgLink } });
+        await setDoc(stateRef, { step: 'WAIT_CUSTOM_REASON', data: { clientChatId, boyId, boyName, tgLink } }, { merge: true });
         await sendMessage(chatId, `✍️ <b>${escapeHTML(boyName)}</b> အား ပယ်ချရသည့် အကြောင်းရင်း အတိအကျကို ယခု Chat တွင် ရိုက်ထည့်ပေးပါ -`);
         return res.status(200).json({ status: 'ok' });
       }
@@ -263,20 +295,6 @@ export default async function handler(req, res) {
       await handleUserRejection(clientChatId, reasonMsg, tgLink);
       await sendMessage(chatId, `❌ <b>${escapeHTML(boyName)}</b> ၏ လျှောက်လွှာကို ပယ်ချပြီး အကြောင်းရင်းကို User ထံ ပို့ပေးလိုက်ပါပြီ။`);
       return res.status(200).json({ status: 'ok' });
-    }
-
-    const stateSnap = await getDoc(stateRef);
-    const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
-
-    if (currentState.step === 'WAIT_CUSTOM_REASON' && text && !text.startsWith('/')) {
-      const { clientChatId, boyId, boyName, tgLink } = currentState.data;
-      const reasonMsg = `❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n👉 <b>${escapeHTML(text)}</b>`;
-      
-      await deleteDoc(doc(db, 'dateboys', boyId));
-      await handleUserRejection(clientChatId, reasonMsg, tgLink);
-      await setDoc(stateRef, { step: 'IDLE', data: {} }, { merge: true });
-      await sendMessage(chatId, `✅ <b>${escapeHTML(boyName)}</b> အား Custom အကြောင်းရင်းဖြင့် ပယ်ချလိုက်ပါပြီ။`);
-      return res.status(200).json({ status: 'success' });
     }
 
     if (text.startsWith('APP_') || text.startsWith('REJ_')) {
@@ -353,23 +371,22 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
-    if (text === '🔄 အစသို့ ပြန်သွားမည်' || text === '/start' || text === 'RESET') {
-      await sendMessage(chatId, "ပင်မ စာမျက်နှာသို့ ပြန်သွားနေပါသည်...", MAIN_MENU_KEYBOARD);
-      await startBotFlow(chatId, stateRef);
-      return res.status(200).json({ status: 'success' });
-    }
-    
-    if (text === '🔍 Date Boy ထပ်ရှာမည်') text = 'ROLE_CLIENT';
-    if (text === '💼 Date Boy လျှောက်မည်') text = 'ROLE_APPLICANT';
-    if (text === '📞 Admin သို့ ဆက်သွယ်ရန်') {
-      const config = await getAppConfig();
-      await sendMessage(chatId, `📞 <b>Admin သို့ ဆက်သွယ်ရန်</b>\n\nအကူအညီ လိုအပ်ပါက အောက်ပါသို့ ဆက်သွယ်မေးမြန်းနိုင်ပါသည်။\n\n📱 ဖုန်း: ${config.paymentInfo.match(/\d+/) ? config.paymentInfo.match(/\d+/)[0] : 'N/A'}\n💬 Telegram: @AdminAccount`);
+    // 🚀 ၃။ State အခြေခံ Logic များကို စစ်ဆေးပါမည်
+    const stateSnap = await getDoc(stateRef);
+    const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
+
+    // Custom အကြောင်းရင်း တောင်းခံသည့်အဆင့်
+    if (currentState.step === 'WAIT_CUSTOM_REASON' && text && !text.startsWith('/')) {
+      const { clientChatId, boyId, boyName, tgLink } = currentState.data;
+      const reasonMsg = `❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n👉 <b>${escapeHTML(text)}</b>`;
+      
+      await deleteDoc(doc(db, 'dateboys', boyId));
+      await handleUserRejection(clientChatId, reasonMsg, tgLink);
+      await setDoc(stateRef, { step: 'IDLE', data: {} }, { merge: true });
+      await sendMessage(chatId, `✅ <b>${escapeHTML(boyName)}</b> အား Custom အကြောင်းရင်းဖြင့် ပယ်ချလိုက်ပါပြီ။`);
       return res.status(200).json({ status: 'success' });
     }
 
-    // ==========================================
-    // 1️⃣ Client & Applicant Role Selection
-    // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
         await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} }, { merge: true });
@@ -377,7 +394,6 @@ export default async function handler(req, res) {
           inline_keyboard: [[{ text: "💳 Admin အား Client ID တောင်းရန်", callback_data: "REQ_CLIENT_ID" }]]
         });
       } else if (text === 'ROLE_APPLICANT') {
-        // 🚀 Ban စနစ် စစ်ဆေးခြင်း
         if (currentState.banned === true) {
           await sendMessage(chatId, "🚨 <b>အသိပေးချက်:</b> သင့်အား စနစ်မှ (၃) ကြိမ်တိတိ ပယ်ချထားပြီးဖြစ်သောကြောင့် Date Boy အဖြစ် ထပ်မံလျှောက်ထားခွင့် မရှိတော့ပါ။", MAIN_MENU_KEYBOARD);
           return res.status(200).json({ status: 'success' });
@@ -409,6 +425,14 @@ export default async function handler(req, res) {
         const keyboard = { inline_keyboard: [[{ text: "✅ Approve & Generate ID", callback_data: `APP_C_${chatId}_X` }, { text: "❌ Reject", callback_data: `REJ_C_${chatId}_X` }]] };
         await fetch(`${TELEGRAM_API}/sendPhoto`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ chat_id: adminChatId, photo: fileIdToForward, caption: adminMsg, parse_mode: 'HTML', reply_markup: keyboard }) });
       }
+      return res.status(200).json({ status: 'success' });
+    }
+
+    // Client ID အဆင့်တွင် အခြားစာများရိုက်မိပါက အသိပေးရန်
+    if (currentState.step === 'ASK_CLIENT_ID' && text && !text.startsWith('/')) {
+      await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ မှန်ကန်သော Client ID (ဥပမာ- WLC-ABCDE) ကိုသာ ရိုက်ထည့်ပါ။ သို့မဟုတ် အောက်ပါခလုတ်ကိုနှိပ်၍ အသစ်ဝယ်ယူပါ။", {
+        inline_keyboard: [[{ text: "💳 Admin အား Client ID တောင်းရန်", callback_data: "REQ_CLIENT_ID" }]]
+      });
       return res.status(200).json({ status: 'success' });
     }
 
