@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, getDocs, where, setDoc, serverTimestamp } from 'firebase/firestore';
-import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut } from 'lucide-react';
+import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut, Ban, Unlock } from 'lucide-react';
 
 const DateBoyCard = ({ boy, isPending, editingBoyId, editBoyData, setEditBoyData, setEditingBoyId, saveEditedBoy, handleApprove, handleDeleteDateBoy, handleToggleVisibility, startEditBoy, setModalImage }) => {
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
@@ -134,6 +134,7 @@ export default function Admin() {
   const [boys, setBoys] = useState([]);
   const [locations, setLocations] = useState([]);
   const [clientIds, setClientIds] = useState([]);
+  const [bannedUsers, setBannedUsers] = useState([]); // 🚀 Banned Users State
   
   const [newCity, setNewCity] = useState('');
   const [newTownship, setNewTownship] = useState('');
@@ -144,7 +145,6 @@ export default function Admin() {
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
 
-  // Settings State များကို ပိုင်းခြားထားပါသည်
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '', privFee: 0, feeSec: 0, feeDay: 0, feeNight: 0, clientIdFee: 0,
     reqText: '', ruleText: ''
@@ -173,10 +173,17 @@ export default function Admin() {
     const unsubBoys = onSnapshot(query(collection(db, 'dateboys')), (snap) => setBoys(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubLocs = onSnapshot(query(collection(db, 'locations')), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubClients = onSnapshot(query(collection(db, 'client_ids')), (snap) => setClientIds(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    
+    // 🚀 Fetch Banned Users
+    const unsubBanned = onSnapshot(query(collection(db, 'telegram_states'), where('banned', '==', true)), (snap) => {
+      setBannedUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     const unsubConfig = onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
       if (docSnap.exists()) setAppConfig(prev => ({ ...prev, ...docSnap.data() }));
     });
-    return () => { unsubAdmins(); unsubBoys(); unsubLocs(); unsubClients(); unsubConfig(); };
+
+    return () => { unsubAdmins(); unsubBoys(); unsubLocs(); unsubClients(); unsubBanned(); unsubConfig(); };
   }, []);
 
   const handleLogin = async (e) => {
@@ -246,20 +253,34 @@ export default function Admin() {
   };
 
   const handleDeleteDateBoy = async (id) => {
-    const reasonInput = window.prompt("ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးပါ-\n1 = အရည်အချင်းမကိုက်ညီခြင်း\n2 = ပုံ/Video များအဆင်မပြေခြင်း (ပြန်တင်ရန်)\n3 = ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း\n(Cancel နှိပ်ပါက ရိုးရိုးပယ်ချမည်)");
+    const reasonInput = window.prompt("ပယ်ချရသည့် အကြောင်းရင်းကို ရွေးပါ-\n1 = အရည်အချင်းမကိုက်ညီခြင်း\n2 = ပုံ/Video များအဆင်မပြေခြင်း (ပြန်တင်ရန်)\n3 = ရုပ်ရည်/ခန္ဓာကိုယ် အဆင်မပြေခြင်း\n4 = အခြား (Custom)\n(Cancel နှိပ်ပါက ရိုးရိုးပယ်ချမည်)");
     if (reasonInput === null && !window.confirm('ရိုးရိုးပယ်ချမှာ သေချာပါသလား?')) return;
     
     let reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n";
     if (reasonInput === '1') reasonMsg += "👉 <b>သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း</b>";
     else if (reasonInput === '2') reasonMsg += "👉 <b>ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း</b>\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)";
     else if (reasonInput === '3') reasonMsg += "👉 <b>ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း</b>";
+    else if (reasonInput === '4') {
+      const customInput = window.prompt("ပယ်ချရသည့် အကြောင်းရင်းကို ရိုက်ထည့်ပါ-");
+      if (!customInput) return;
+      reasonMsg += `👉 <b>${customInput}</b>`;
+    }
     else reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
     const boy = boys.find(b => b.id === id);
     if (boy && boy.status === 'pending' && boy.telegramChatId) {
-      fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'notify_user', chatId: boy.telegramChatId, text: reasonMsg, useMenu: true }) }).catch(e => console.error(e));
+      // 🚀 internal_action အား 'reject_user' သို့ပြောင်း၍ Ban စနစ်နှင့် ချိတ်ဆက်ထားသည်
+      fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'reject_user', chatId: boy.telegramChatId, text: reasonMsg }) }).catch(e => console.error(e));
     }
     await deleteDoc(doc(db, 'dateboys', id));
+  };
+
+  // 🚀 User အား ပြန်လည် ဖွင့်ပေးမည့် (Unban) Function
+  const handleUnbanUser = async (chatId) => {
+    if (window.confirm('ဤ User အား လျှောက်ထားခွင့် ပြန်လည် ဖွင့်ပေးမည်မှာ သေချာပါသလား?')) {
+      await updateDoc(doc(db, 'telegram_states', chatId), { banned: false, rejectCount: 0 });
+      alert("စာပို့ခွင့် ပြန်လည် ဖွင့်ပေးလိုက်ပါပြီ။");
+    }
   };
 
   const handleDeleteClientId = async (id) => { if (window.confirm('ဤ Client ID ကို ပယ်ဖျက်မှာ သေချာပါသလား?')) await deleteDoc(doc(db, 'client_ids', id)); };
@@ -280,26 +301,19 @@ export default function Admin() {
   const handleApproveLocation = async (id) => updateDoc(doc(db, 'locations', id), { status: 'approved' });
   const handleDeleteLocation = async (id) => window.confirm('ဖျက်မှာ သေချာပါသလား?') && deleteDoc(doc(db, 'locations', id));
 
-  // Settings Save Functions
-  const startEditRules = () => {
-    setDraftRules({ reqText: appConfig.reqText, ruleText: appConfig.ruleText });
-    setIsEditingRules(true);
-  };
-  const startEditPricing = () => {
-    setDraftPricing({ paymentInfo: appConfig.paymentInfo, clientIdFee: appConfig.clientIdFee, privFee: appConfig.privFee, feeSec: appConfig.feeSec, feeDay: appConfig.feeDay, feeNight: appConfig.feeNight });
-    setIsEditingPricing(true);
-  };
+  const startEditRules = () => { setDraftRules({ reqText: appConfig.reqText, ruleText: appConfig.ruleText }); setIsEditingRules(true); };
+  const startEditPricing = () => { setDraftPricing({ paymentInfo: appConfig.paymentInfo, clientIdFee: appConfig.clientIdFee, privFee: appConfig.privFee, feeSec: appConfig.feeSec, feeDay: appConfig.feeDay, feeNight: appConfig.feeNight }); setIsEditingPricing(true); };
+  
   const handleSaveRules = async () => {
     setIsConfigSaving(true);
     await setDoc(doc(db, 'settings', 'app_config'), draftRules, { merge: true });
-    setIsConfigSaving(false);
-    setIsEditingRules(false);
+    setIsConfigSaving(false); setIsEditingRules(false);
   };
+  
   const handleSavePricing = async () => {
     setIsConfigSaving(true);
     await setDoc(doc(db, 'settings', 'app_config'), draftPricing, { merge: true });
-    setIsConfigSaving(false);
-    setIsEditingPricing(false);
+    setIsConfigSaving(false); setIsEditingPricing(false);
   };
 
   if (!loggedInAdmin) {
@@ -379,6 +393,7 @@ export default function Admin() {
             <TabButton tab="requests" icon={Clock} label="လျှောက်လွှာအသစ်" count={pendingBoys.length} />
             <TabButton tab="dateboys" icon={UserCheck} label="Date Boys" count={approvedBoys.length} />
             <TabButton tab="clients" icon={KeyRound} label="Client IDs" count={0} />
+            <TabButton tab="banned" icon={Ban} label="🚫 Ban စာရင်းများ" count={bannedUsers.length} />
             <TabButton tab="settings" icon={Settings} label="ဆက်တင်များ" count={0} />
             {loggedInAdmin.role === 'super_admin' && (
               <TabButton tab="admins" icon={Shield} label="Admin အကောင့်များ" count={adminUsers.length} />
@@ -428,6 +443,32 @@ export default function Admin() {
                         <a href={`tg://user?id=${client.telegramChatId}`} className="text-xs sm:text-sm flex items-center justify-center gap-2 bg-blue-50 text-blue-600 py-2.5 rounded-xl font-bold hover:bg-blue-100 transition-colors">Telegram Profile သို့သွားရန်</a>
                       </div>
                       <button onClick={() => handleDeleteClientId(client.id)} className="w-full mt-4 bg-white border border-rose-200 text-rose-500 py-2.5 rounded-xl font-bold hover:bg-rose-50 text-xs sm:text-sm flex justify-center items-center gap-2 transition-colors"><Trash2 size={16}/> ပယ်ဖျက်မည်</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 🚫 Banned Users Tab (New) */}
+          {activeTab === 'banned' && (
+            <div className="space-y-4 sm:space-y-6">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800 text-rose-600 flex items-center gap-2"><Ban size={22}/> ပယ်ချခံရသည့် (Ban) စာရင်းများ</h3>
+              {bannedUsers.length === 0 ? (
+                <div className="bg-white p-10 sm:p-16 text-center rounded-3xl border border-slate-200 border-dashed"><div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4"><Ban className="text-slate-400" size={24}/></div><p className="text-sm sm:text-base text-slate-500 font-medium">လောလောဆယ် လျှောက်ထားခွင့် ပိတ်ခံရသူ မရှိသေးပါ။</p></div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                  {bannedUsers.map(user => (
+                    <div key={user.id} className="bg-white border border-rose-200 p-5 sm:p-6 rounded-3xl shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
+                      <div>
+                        <div className="text-[10px] sm:text-xs font-bold text-rose-500 mb-2 uppercase tracking-widest flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Banned User</div>
+                        <h4 className="font-bold text-lg sm:text-xl text-slate-800 bg-slate-50 py-3 px-4 rounded-xl border border-slate-100 text-center mb-4 break-all">ID: {user.id}</h4>
+                        <div className="bg-rose-50 text-rose-600 text-xs sm:text-sm font-bold text-center py-2 rounded-lg mb-4">ပယ်ချခံရမှု ({user.rejectCount}) ကြိမ်</div>
+                        {user.telegramProfileLink && (
+                          <a href={user.telegramProfileLink} className="text-xs sm:text-sm flex items-center justify-center gap-2 bg-blue-50 text-blue-600 py-2.5 rounded-xl font-bold hover:bg-blue-100 transition-colors">Telegram Profile သို့သွားရန်</a>
+                        )}
+                      </div>
+                      <button onClick={() => handleUnbanUser(user.id)} className="w-full mt-4 bg-emerald-50 border border-emerald-200 text-emerald-600 py-2.5 rounded-xl font-bold hover:bg-emerald-100 text-xs sm:text-sm flex justify-center items-center gap-2 transition-colors"><Unlock size={16}/> ပြန်လည်ဖွင့်ပေးမည်</button>
                     </div>
                   ))}
                 </div>
@@ -509,7 +550,6 @@ export default function Admin() {
               
               <div className="xl:col-span-2 space-y-6 sm:space-y-8">
                 
-                {/* 📝 စည်းမျဉ်းစည်းကမ်းများ ကတ် (Card 1) */}
                 <div className="bg-white p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-200">
                   <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                     <h4 className="text-sm sm:text-base font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -553,7 +593,6 @@ export default function Admin() {
                   )}
                 </div>
 
-                {/* 💳 ငွေပေးချေမှုနှင့် ဈေးနှုန်းများ ကတ် (Card 2) */}
                 <div className="bg-white p-5 sm:p-8 rounded-3xl shadow-sm border border-slate-200">
                   <div className="flex justify-between items-center mb-6 border-b border-slate-100 pb-4">
                     <h4 className="text-sm sm:text-base font-bold text-slate-800 uppercase tracking-widest flex items-center gap-2">
@@ -635,7 +674,6 @@ export default function Admin() {
 
               </div>
 
-              {/* 📍 မြို့နယ်များစီမံရန် အပိုင်း */}
               <div className="space-y-6">
                 
                 <div className="bg-white p-5 sm:p-6 rounded-3xl shadow-sm border border-slate-200">
