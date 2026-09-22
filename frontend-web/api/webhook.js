@@ -66,8 +66,8 @@ async function getTelegramFileUrl(fileId) {
   return null;
 }
 
-// 🛡️ User ကို Reject လုပ်ပြီး Ban မှတ်တမ်းတင်မည့် Helper Function (Web နှင့် Bot ၂ ခုလုံးအတွက်)
-async function handleUserRejection(clientChatId, reasonMsg) {
+// 🛡️ User ကို Reject လုပ်ပြီး Ban မှတ်တမ်းတင်မည့် Helper Function
+async function handleUserRejection(clientChatId, reasonMsg, telegramProfileLink) {
   const stateRef = doc(db, 'telegram_states', String(clientChatId));
   const stateSnap = await getDoc(stateRef);
   let currentRejects = 0;
@@ -82,7 +82,8 @@ async function handleUserRejection(clientChatId, reasonMsg) {
     step: 'IDLE', 
     data: {}, 
     rejectCount: currentRejects, 
-    banned: isBanned 
+    banned: isBanned,
+    telegramProfileLink: telegramProfileLink
   }, { merge: true });
 
   let finalMessage = `${reasonMsg}\n\n`;
@@ -101,15 +102,13 @@ export default async function handler(req, res) {
   try {
     if (req.method !== 'POST') return res.status(200).json({ status: 'Bot Server is running!' });
 
-    // 🚀 Admin Panel မှ User အား Approve/Notify လုပ်ခြင်း
     if (req.body.internal_action === 'notify_user') {
       await sendMessage(req.body.chatId, req.body.text, req.body.useMenu ? MAIN_MENU_KEYBOARD : null);
       return res.status(200).json({ status: 'notified' });
     }
 
-    // 🚀 Admin Panel မှ User အား ပယ်ချ (Reject) ခြင်း (Ban System နှင့် ချိတ်ဆက်ထားသည်)
     if (req.body.internal_action === 'reject_user') {
-      await handleUserRejection(req.body.chatId, req.body.text);
+      await handleUserRejection(req.body.chatId, req.body.text, `tg://user?id=${req.body.chatId}`);
       return res.status(200).json({ status: 'rejected' });
     }
 
@@ -141,6 +140,7 @@ export default async function handler(req, res) {
 
     if (!chatId) return res.status(200).json({ status: 'No chatId' });
     const stateRef = doc(db, 'telegram_states', String(chatId));
+    const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
 
     if (text === '/ping') {
       await sendMessage(chatId, "✅ Webhook is running (Ban & Custom Reject System)!");
@@ -156,7 +156,6 @@ export default async function handler(req, res) {
     const cleanText = text.replace(/[\u2010-\u2015]/g, '-').replace(/[\u200B-\u200D\uFEFF]/g, '');
     const inputText = cleanText.toUpperCase().replace(/\s+/g, '');
 
-    // 🚀 Client ID Auto Detect
     if (inputText.startsWith('WLC-')) {
       try {
         const clientDoc = await getDoc(doc(db, 'client_ids', inputText));
@@ -175,8 +174,8 @@ export default async function handler(req, res) {
             await setDoc(stateRef, { step: 'IDLE', data: {} });
           } else {
             const keyboard = cities.map((c, index) => [{ text: `🏙️ ${c}`, callback_data: `CITYIDX_${index}` }]);
-            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: { availableCities: cities } });
-            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ။\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
+            await setDoc(stateRef, { step: 'CLIENT_SELECT_CITY', data: { availableCities: cities } }, { merge: true });
+            await sendMessage(chatId, "✅ Client ID အတည်ပြုပြီးပါပြီ。\n\n🔍 ကျေးဇူးပြု၍ ရှာဖွေလိုသော <b>မြို့</b> ကို အရင်ရွေးချယ်ပါ -", { inline_keyboard: keyboard });
           }
         }
       } catch (err) {
@@ -238,7 +237,6 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: 'ok' });
     }
 
-    // 🚀 Bot မှနေ၍ Date Boy ကို ပယ်ချခြင်း နှင့် Custom အကြောင်းရင်း တောင်းခံခြင်း
     if (text.startsWith('R_R')) {
       const parts = text.split('_');
       const reasonCode = parts[1]; // R1, R2, R3, R4, R5(Custom)
@@ -247,10 +245,10 @@ export default async function handler(req, res) {
       
       const boySnap = await getDoc(doc(db, 'dateboys', boyId));
       const boyName = boySnap.exists() ? boySnap.data().name : 'Applicant';
+      const tgLink = boySnap.exists() ? boySnap.data().telegramProfileLink : `tg://user?id=${clientChatId}`;
 
       if (reasonCode === 'R5') {
-        // Custom Reason ရေးရန် Admin ထံသို့ စာတောင်းမည်
-        await setDoc(stateRef, { step: 'WAIT_CUSTOM_REASON', data: { clientChatId, boyId, boyName } });
+        await setDoc(stateRef, { step: 'WAIT_CUSTOM_REASON', data: { clientChatId, boyId, boyName, tgLink } });
         await sendMessage(chatId, `✍️ <b>${escapeHTML(boyName)}</b> အား ပယ်ချရသည့် အကြောင်းရင်း အတိအကျကို ယခု Chat တွင် ရိုက်ထည့်ပေးပါ -`);
         return res.status(200).json({ status: 'ok' });
       }
@@ -262,7 +260,7 @@ export default async function handler(req, res) {
       else if (reasonCode === 'R4') reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
       await deleteDoc(doc(db, 'dateboys', boyId));
-      await handleUserRejection(clientChatId, reasonMsg);
+      await handleUserRejection(clientChatId, reasonMsg, tgLink);
       await sendMessage(chatId, `❌ <b>${escapeHTML(boyName)}</b> ၏ လျှောက်လွှာကို ပယ်ချပြီး အကြောင်းရင်းကို User ထံ ပို့ပေးလိုက်ပါပြီ။`);
       return res.status(200).json({ status: 'ok' });
     }
@@ -270,19 +268,17 @@ export default async function handler(req, res) {
     const stateSnap = await getDoc(stateRef);
     const currentState = stateSnap.exists() ? stateSnap.data() : { step: 'IDLE', data: {} };
 
-    // 🚀 Admin မှ Custom အကြောင်းရင်း ရိုက်ထည့်ပြီးချိန်
     if (currentState.step === 'WAIT_CUSTOM_REASON' && text && !text.startsWith('/')) {
-      const { clientChatId, boyId, boyName } = currentState.data;
+      const { clientChatId, boyId, boyName, tgLink } = currentState.data;
       const reasonMsg = `❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n👉 <b>${escapeHTML(text)}</b>`;
       
       await deleteDoc(doc(db, 'dateboys', boyId));
-      await handleUserRejection(clientChatId, reasonMsg);
-      await setDoc(stateRef, { step: 'IDLE', data: {} });
+      await handleUserRejection(clientChatId, reasonMsg, tgLink);
+      await setDoc(stateRef, { step: 'IDLE', data: {} }, { merge: true });
       await sendMessage(chatId, `✅ <b>${escapeHTML(boyName)}</b> အား Custom အကြောင်းရင်းဖြင့် ပယ်ချလိုက်ပါပြီ။`);
       return res.status(200).json({ status: 'success' });
     }
 
-    // --- Admin Approvals ---
     if (text.startsWith('APP_') || text.startsWith('REJ_')) {
       const parts = text.split('_');
       const action = parts[0] + '_' + parts[1];
@@ -343,7 +339,6 @@ export default async function handler(req, res) {
         await sendMessage(chatId, `✅ <b>${escapeHTML(boy.name)}</b> ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`);
       } 
       else if (action === 'REJ_D') {
-        // 🚀 Telegram တွင် ပယ်ချရာ၌ Custom ခလုတ် ထပ်တိုးထားပါသည်
         const reasonKeyboard = {
           inline_keyboard: [
             [{ text: "⚠️ အရည်အချင်း မကိုက်ညီခြင်း", callback_data: `R_R1_${clientChatId}_${boyId}` }],
@@ -377,14 +372,14 @@ export default async function handler(req, res) {
     // ==========================================
     if (currentState.step === 'CHOOSING_ROLE' || text === 'ROLE_CLIENT' || text === 'ROLE_APPLICANT') {
       if (text === 'ROLE_CLIENT') {
-        await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} });
+        await setDoc(stateRef, { step: 'ASK_CLIENT_ID', data: {} }, { merge: true });
         await sendMessage(chatId, "🔐 <b>Date Boy ရှာဖွေရန် Client ID လိုအပ်ပါသည်။</b>\n\nကျေးဇူးပြု၍ သင့်၏ လျှို့ဝှက် Client ID အား ရိုက်ထည့်ပါ (ဥပမာ - WLC-ABC12) -\n\n(Client ID မရှိသေးပါက အောက်ပါခလုတ်ကို နှိပ်၍ တောင်းဆိုနိုင်ပါသည်။)", {
           inline_keyboard: [[{ text: "💳 Admin အား Client ID တောင်းရန်", callback_data: "REQ_CLIENT_ID" }]]
         });
       } else if (text === 'ROLE_APPLICANT') {
         // 🚀 Ban စနစ် စစ်ဆေးခြင်း
         if (currentState.banned === true) {
-          await sendMessage(chatId, "🚨 သင့်အား စနစ်မှ (၃) ကြိမ်တိတိ ပယ်ချထားပြီးဖြစ်သောကြောင့် Date Boy အဖြစ် ထပ်မံလျှောက်ထားခွင့် မရှိတော့ပါ။", MAIN_MENU_KEYBOARD);
+          await sendMessage(chatId, "🚨 <b>အသိပေးချက်:</b> သင့်အား စနစ်မှ (၃) ကြိမ်တိတိ ပယ်ချထားပြီးဖြစ်သောကြောင့် Date Boy အဖြစ် ထပ်မံလျှောက်ထားခွင့် မရှိတော့ပါ။", MAIN_MENU_KEYBOARD);
           return res.status(200).json({ status: 'success' });
         }
 
@@ -399,13 +394,13 @@ export default async function handler(req, res) {
 
     if (text === 'REQ_CLIENT_ID') {
       const config = await getAppConfig();
-      await setDoc(stateRef, { step: 'WAIT_CLIENT_ID_SS', data: {} });
+      await setDoc(stateRef, { step: 'WAIT_CLIENT_ID_SS', data: {} }, { merge: true });
       await sendMessage(chatId, `💳 Client ID ရယူရန်အတွက် ကျသင့်ငွေမှာ <b>${config.clientIdFee} ကျပ်</b> ဖြစ်ပါသည်။\n\nအောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`);
       return res.status(200).json({ status: 'success' });
     }
 
     if (currentState.step === 'WAIT_CLIENT_ID_SS' && photos.length > 0) {
-      await setDoc(stateRef, { step: 'IDLE', data: {} });
+      await setDoc(stateRef, { step: 'IDLE', data: {} }, { merge: true });
       await sendMessage(chatId, "⏳ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ စစ်ဆေးပြီးပါက သင့်အတွက် လျှို့ဝှက် Client ID ကို ဤနေရာသို့ ပို့ပေးပါမည်။");
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
@@ -666,7 +661,7 @@ JavaScript
 import React, { useState, useEffect } from 'react';
 import { db } from '../config/firebase';
 import { collection, query, onSnapshot, doc, updateDoc, deleteDoc, addDoc, getDocs, where, setDoc, serverTimestamp } from 'firebase/firestore';
-import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut } from 'lucide-react';
+import { UserCheck, Clock, Plus, Trash2, CheckCircle2, Settings, Eye, Pencil, EyeOff, Save, X, CreditCard, FileText, KeyRound, Smartphone, MapPin, Ruler, Activity, Lock, Shield, LogOut, Ban, Unlock } from 'lucide-react';
 
 const DateBoyCard = ({ boy, isPending, editingBoyId, editBoyData, setEditBoyData, setEditingBoyId, saveEditedBoy, handleApprove, handleDeleteDateBoy, handleToggleVisibility, startEditBoy, setModalImage }) => {
   const pPhotos = Array.isArray(boy.publicPhotos) ? boy.publicPhotos : (boy.publicPhoto ? [boy.publicPhoto] : []);
@@ -799,6 +794,7 @@ export default function Admin() {
   const [boys, setBoys] = useState([]);
   const [locations, setLocations] = useState([]);
   const [clientIds, setClientIds] = useState([]);
+  const [bannedUsers, setBannedUsers] = useState([]); // 🚀 Banned Users State
   
   const [newCity, setNewCity] = useState('');
   const [newTownship, setNewTownship] = useState('');
@@ -837,10 +833,17 @@ export default function Admin() {
     const unsubBoys = onSnapshot(query(collection(db, 'dateboys')), (snap) => setBoys(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubLocs = onSnapshot(query(collection(db, 'locations')), (snap) => setLocations(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
     const unsubClients = onSnapshot(query(collection(db, 'client_ids')), (snap) => setClientIds(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
+    
+    // 🚀 Fetch Banned Users
+    const unsubBanned = onSnapshot(query(collection(db, 'telegram_states'), where('banned', '==', true)), (snap) => {
+      setBannedUsers(snap.docs.map(d => ({ id: d.id, ...d.data() })));
+    });
+
     const unsubConfig = onSnapshot(doc(db, 'settings', 'app_config'), (docSnap) => {
       if (docSnap.exists()) setAppConfig(prev => ({ ...prev, ...docSnap.data() }));
     });
-    return () => { unsubAdmins(); unsubBoys(); unsubLocs(); unsubClients(); unsubConfig(); };
+
+    return () => { unsubAdmins(); unsubBoys(); unsubLocs(); unsubClients(); unsubBanned(); unsubConfig(); };
   }, []);
 
   const handleLogin = async (e) => {
@@ -926,10 +929,18 @@ export default function Admin() {
 
     const boy = boys.find(b => b.id === id);
     if (boy && boy.status === 'pending' && boy.telegramChatId) {
-      // 🚀 Reject_User Action ဖြင့် ခေါ်ယူ၍ Ban စနစ်ကို အလုပ်လုပ်စေပါသည်
+      // 🚀 internal_action အား 'reject_user' သို့ပြောင်း၍ Ban စနစ်နှင့် ချိတ်ဆက်ထားသည်
       fetch('/api/webhook', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ internal_action: 'reject_user', chatId: boy.telegramChatId, text: reasonMsg }) }).catch(e => console.error(e));
     }
     await deleteDoc(doc(db, 'dateboys', id));
+  };
+
+  // 🚀 User အား ပြန်လည် ဖွင့်ပေးမည့် (Unban) Function
+  const handleUnbanUser = async (chatId) => {
+    if (window.confirm('ဤ User အား လျှောက်ထားခွင့် ပြန်လည် ဖွင့်ပေးမည်မှာ သေချာပါသလား?')) {
+      await updateDoc(doc(db, 'telegram_states', chatId), { banned: false, rejectCount: 0 });
+      alert("စာပို့ခွင့် ပြန်လည် ဖွင့်ပေးလိုက်ပါပြီ။");
+    }
   };
 
   const handleDeleteClientId = async (id) => { if (window.confirm('ဤ Client ID ကို ပယ်ဖျက်မှာ သေချာပါသလား?')) await deleteDoc(doc(db, 'client_ids', id)); };
@@ -1042,6 +1053,7 @@ export default function Admin() {
             <TabButton tab="requests" icon={Clock} label="လျှောက်လွှာအသစ်" count={pendingBoys.length} />
             <TabButton tab="dateboys" icon={UserCheck} label="Date Boys" count={approvedBoys.length} />
             <TabButton tab="clients" icon={KeyRound} label="Client IDs" count={0} />
+            <TabButton tab="banned" icon={Ban} label="🚫 Ban စာရင်းများ" count={bannedUsers.length} />
             <TabButton tab="settings" icon={Settings} label="ဆက်တင်များ" count={0} />
             {loggedInAdmin.role === 'super_admin' && (
               <TabButton tab="admins" icon={Shield} label="Admin အကောင့်များ" count={adminUsers.length} />
@@ -1091,6 +1103,32 @@ export default function Admin() {
                         <a href={`tg://user?id=${client.telegramChatId}`} className="text-xs sm:text-sm flex items-center justify-center gap-2 bg-blue-50 text-blue-600 py-2.5 rounded-xl font-bold hover:bg-blue-100 transition-colors">Telegram Profile သို့သွားရန်</a>
                       </div>
                       <button onClick={() => handleDeleteClientId(client.id)} className="w-full mt-4 bg-white border border-rose-200 text-rose-500 py-2.5 rounded-xl font-bold hover:bg-rose-50 text-xs sm:text-sm flex justify-center items-center gap-2 transition-colors"><Trash2 size={16}/> ပယ်ဖျက်မည်</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* 🚫 Banned Users Tab (New) */}
+          {activeTab === 'banned' && (
+            <div className="space-y-4 sm:space-y-6">
+              <h3 className="text-lg sm:text-xl font-bold text-slate-800 text-rose-600 flex items-center gap-2"><Ban size={22}/> ပယ်ချခံရသည့် (Ban) စာရင်းများ</h3>
+              {bannedUsers.length === 0 ? (
+                <div className="bg-white p-10 sm:p-16 text-center rounded-3xl border border-slate-200 border-dashed"><div className="w-14 h-14 sm:w-16 sm:h-16 bg-slate-50 rounded-full flex items-center justify-center mx-auto mb-4"><Ban className="text-slate-400" size={24}/></div><p className="text-sm sm:text-base text-slate-500 font-medium">လောလောဆယ် လျှောက်ထားခွင့် ပိတ်ခံရသူ မရှိသေးပါ။</p></div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 sm:gap-5">
+                  {bannedUsers.map(user => (
+                    <div key={user.id} className="bg-white border border-rose-200 p-5 sm:p-6 rounded-3xl shadow-sm flex flex-col justify-between hover:shadow-md transition-shadow">
+                      <div>
+                        <div className="text-[10px] sm:text-xs font-bold text-rose-500 mb-2 uppercase tracking-widest flex items-center gap-1.5"><div className="w-2 h-2 rounded-full bg-rose-500"></div> Banned User</div>
+                        <h4 className="font-bold text-lg sm:text-xl text-slate-800 bg-slate-50 py-3 px-4 rounded-xl border border-slate-100 text-center mb-4 break-all">ID: {user.id}</h4>
+                        <div className="bg-rose-50 text-rose-600 text-xs sm:text-sm font-bold text-center py-2 rounded-lg mb-4">ပယ်ချခံရမှု ({user.rejectCount}) ကြိမ်</div>
+                        {user.telegramProfileLink && (
+                          <a href={user.telegramProfileLink} className="text-xs sm:text-sm flex items-center justify-center gap-2 bg-blue-50 text-blue-600 py-2.5 rounded-xl font-bold hover:bg-blue-100 transition-colors">Telegram Profile သို့သွားရန်</a>
+                        )}
+                      </div>
+                      <button onClick={() => handleUnbanUser(user.id)} className="w-full mt-4 bg-emerald-50 border border-emerald-200 text-emerald-600 py-2.5 rounded-xl font-bold hover:bg-emerald-100 text-xs sm:text-sm flex justify-center items-center gap-2 transition-colors"><Unlock size={16}/> ပြန်လည်ဖွင့်ပေးမည်</button>
                     </div>
                   ))}
                 </div>
