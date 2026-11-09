@@ -1,0 +1,11 @@
+{
+  "name": "welink-dateboyagent-project",
+  "private": true,
+  "workspaces": [
+    "frontend-web"
+  ],
+  "scripts": {
+    "dev": "cd frontend-web && bun run dev --host 0.0.0.0",
+    "build": "cd frontend-web && bun run build"
+  }
+}
