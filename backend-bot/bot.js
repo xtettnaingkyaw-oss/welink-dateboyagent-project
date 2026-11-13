@@ -94,6 +94,7 @@ bot.on('message', async (msg) => {
                 bot.sendMessage(chatId, "အချက်အလက်များ သိမ်းဆည်းနေပါသည်။ ခဏစောင့်ပေးပါ...");
                 
                 try {
+                    const proxyPhotoUrl = `/api/webhook?file_id=${encodeURIComponent(state.data.publicPhoto)}`;
                     await db.collection('dateboys').add({
                         name: state.data.name,
                         age: state.data.age,
@@ -101,7 +102,9 @@ bot.on('message', async (msg) => {
                         city: state.data.city,
                         township: state.data.township,
                         phone: state.data.phone,
-                        publicPhoto: state.data.publicPhoto, // Telegram File ID
+                        publicPhoto: proxyPhotoUrl,
+                        publicPhotos: [proxyPhotoUrl],
+                        publicFileIds: [state.data.publicPhoto], // Permanent Telegram File ID
                         status: 'pending', // Admin Approve စောင့်နေရန်
                         telegramChatId: chatId, // နောက်ပိုင်း Approve/Reject လုပ်ရင် Chat Box ကို အကြောင်းပြန်ဖို့
                         createdAt: new Date()

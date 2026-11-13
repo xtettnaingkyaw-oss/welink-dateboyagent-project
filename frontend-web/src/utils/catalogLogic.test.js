@@ -1,13 +1,61 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  resolveMediaUrl,
+  isLegacyExpiredProneTelegramMedia,
   normalizeCompanionRecord,
   filterAndSortCompanions,
   validateRegistrationForm,
   formatBookingSummary,
 } from './catalogLogic.js';
 
-test('normalizeCompanionRecord handles both publicPhotos array and legacy publicPhoto string', () => {
+test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
+  // 1. Explicit fileIdFallback takes priority and never expires
+  assert.equal(
+    resolveMediaUrl('https://api.telegram.org/file/bot123:ABC/photos/file_1.jpg', 'AgACAgUAAxkBAA'),
+    '/api/webhook?file_id=AgACAgUAAxkBAA'
+  );
+
+  // 2. Raw Telegram file_id (e.g., from backend-bot/bot.js)
+  assert.equal(resolveMediaUrl('AgACAgUAAxkBAA999'), '/api/webhook?file_id=AgACAgUAAxkBAA999');
+
+  // 3. Full domain proxy URL normalized to relative path
+  assert.equal(
+    resolveMediaUrl('https://welink.vercel.app/api/webhook?file_id=AgACAgU123'),
+    '/api/webhook?file_id=AgACAgU123'
+  );
+
+  // 4. Legacy api.telegram.org URL stripped of bot token and routed through legacy_path proxy
+  assert.equal(
+    resolveMediaUrl('https://api.telegram.org/file/bot999999:SECRET_TOKEN/photos/file_42.jpg'),
+    '/api/webhook?legacy_path=photos%2Ffile_42.jpg'
+  );
+
+  // 5. Video type appends &type=video
+  assert.equal(
+    resolveMediaUrl('', 'BAACAgUAAxkBAA_VID', 'video'),
+    '/api/webhook?file_id=BAACAgUAAxkBAA_VID&type=video'
+  );
+});
+
+test('isLegacyExpiredProneTelegramMedia detects records with raw api.telegram.org links and no file_ids', () => {
+  const legacyBoy = {
+    id: 'gzhhg123',
+    name: 'Htet Myat',
+    publicPhotos: ['https://api.telegram.org/file/bot123:SEC/photos/file_10.jpg'],
+  };
+  assert.equal(isLegacyExpiredProneTelegramMedia(legacyBoy), true);
+
+  const upgradedBoy = {
+    id: 'gzhhg123',
+    name: 'Htet Myat',
+    publicPhotos: ['/api/webhook?file_id=AgACAgUAAxk1'],
+    publicFileIds: ['AgACAgUAAxk1'],
+  };
+  assert.equal(isLegacyExpiredProneTelegramMedia(upgradedBoy), false);
+});
+
+test('normalizeCompanionRecord handles publicPhotos, legacy publicPhoto, and Telegram file_ids', () => {
   const fromArray = normalizeCompanionRecord({
     id: 'abc12345',
     name: 'Aung',
@@ -23,15 +71,21 @@ test('normalizeCompanionRecord handles both publicPhotos array and legacy public
   assert.equal(fromArray.publicPhotos.length, 2);
   assert.equal(fromArray.hasUploadedPhoto, true);
 
-  const fromLegacy = normalizeCompanionRecord({
-    id: 'xyz98765',
-    name: 'Min',
-    publicPhoto: 'https://example.com/legacy.jpg',
+  const fromTelegramFileIds = normalizeCompanionRecord({
+    id: 'gzhhg999',
+    name: 'Htet Myat',
+    publicFileIds: ['AgACAgUAA1', 'AgACAgUAA2', 'AgACAgUAA3'],
+    privateFileIds: ['AgACAgUPRIV1'],
+    privateVideoFileId: 'BAACAgUVID1',
   });
-  assert.equal(fromLegacy.boyCode, 'WLDB-XYZ98');
-  assert.equal(fromLegacy.primaryPhoto, 'https://example.com/legacy.jpg');
-  assert.equal(fromLegacy.publicPhotos.length, 1);
-  assert.equal(fromLegacy.hasUploadedPhoto, true);
+  assert.equal(fromTelegramFileIds.boyCode, 'WLDB-GZHHG');
+  assert.equal(fromTelegramFileIds.primaryPhoto, '/api/webhook?file_id=AgACAgUAA1');
+  assert.equal(fromTelegramFileIds.publicPhotos.length, 3);
+  assert.equal(fromTelegramFileIds.privatePhotos[0], '/api/webhook?file_id=AgACAgUPRIV1');
+  assert.equal(
+    fromTelegramFileIds.privateVideo,
+    '/api/webhook?file_id=BAACAgUVID1&type=video'
+  );
 });
 
 test('filterAndSortCompanions filters by city, ageRange, searchQuery, and sorts accurately', () => {

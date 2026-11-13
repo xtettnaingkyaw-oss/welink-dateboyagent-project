@@ -45,8 +45,80 @@ export const CURATED_SHOWCASE_COMPANIONS = [
 ];
 
 /**
- * Normalizes a companion document from Firestore (supporting both legacy `publicPhoto`
- * and multi-photo `publicPhotos` arrays from Web and Telegram Bot).
+ * Resolves any stored photo/video string or Telegram file_id into a safe, non-expiring
+ * relative proxy URL (/api/webhook?file_id=...) or asset/data URL.
+ * Never exposes TELEGRAM_BOT_TOKEN in the browser DOM.
+ */
+export function resolveMediaUrl(rawItem, fileIdFallback = '', type = 'photo') {
+  const typeParam = type === 'video' ? '&type=video' : '';
+  if (typeof fileIdFallback === 'string' && fileIdFallback.trim().length > 0) {
+    return `/api/webhook?file_id=${encodeURIComponent(fileIdFallback.trim())}${typeParam}`;
+  }
+
+  if (typeof rawItem !== 'string' || !rawItem.trim()) {
+    return '';
+  }
+
+  const trimmed = rawItem.trim();
+
+  // Already a proxy URL (absolute or relative) -> normalize to relative /api/webhook?... so it works on any host
+  const proxyIdx = trimmed.indexOf('/api/webhook?');
+  if (proxyIdx !== -1) {
+    return trimmed.slice(proxyIdx);
+  }
+
+  // Data URLs (Base64 from Web registration or Admin upload) or local static assets
+  if (trimmed.startsWith('data:') || trimmed.startsWith('/assets/')) {
+    return trimmed;
+  }
+
+  // Legacy api.telegram.org/file/bot<TOKEN>/<file_path> URL -> route through server proxy without exposing bot token
+  const legacyMatch = trimmed.match(/api\.telegram\.org\/file\/bot[^/]+\/(.+)$/);
+  if (legacyMatch && legacyMatch[1]) {
+    return `/api/webhook?legacy_path=${encodeURIComponent(legacyMatch[1])}${typeParam}`;
+  }
+
+  // Standard HTTPS URL
+  if (trimmed.startsWith('http://') || trimmed.startsWith('https://') || trimmed.startsWith('/')) {
+    return trimmed;
+  }
+
+  // Raw Telegram file_id (e.g., saved by backend-bot/bot.js)
+  return `/api/webhook?file_id=${encodeURIComponent(trimmed)}${typeParam}`;
+}
+
+/**
+ * Detects whether a companion record still relies on legacy 1-hour expiring api.telegram.org URLs
+ * without permanent Telegram file_ids.
+ */
+export function isLegacyExpiredProneTelegramMedia(rawBoy) {
+  if (!rawBoy || typeof rawBoy !== 'object') return false;
+  const pubIds = Array.isArray(rawBoy.publicFileIds) ? rawBoy.publicFileIds.filter(Boolean) : [];
+  const privIds = Array.isArray(rawBoy.privateFileIds) ? rawBoy.privateFileIds.filter(Boolean) : [];
+  const pubPhotos = Array.isArray(rawBoy.publicPhotos)
+    ? rawBoy.publicPhotos
+    : rawBoy.publicPhoto
+      ? [rawBoy.publicPhoto]
+      : [];
+  const privPhotos = Array.isArray(rawBoy.privatePhotos) ? rawBoy.privatePhotos : [];
+
+  const hasLegacyPub =
+    pubIds.length === 0 &&
+    pubPhotos.some((u) => typeof u === 'string' && u.includes('api.telegram.org/file/bot'));
+  const hasLegacyPriv =
+    privIds.length === 0 &&
+    privPhotos.some((u) => typeof u === 'string' && u.includes('api.telegram.org/file/bot'));
+  const hasLegacyVid =
+    !rawBoy.privateVideoFileId &&
+    typeof rawBoy.privateVideo === 'string' &&
+    rawBoy.privateVideo.includes('api.telegram.org/file/bot');
+
+  return hasLegacyPub || hasLegacyPriv || hasLegacyVid;
+}
+
+/**
+ * Normalizes a companion document from Firestore (supporting both legacy `publicPhoto`,
+ * multi-photo `publicPhotos` arrays, and permanent `publicFileIds`/`privateFileIds` from Telegram Bot).
  */
 export function normalizeCompanionRecord(rawBoy, index = 0) {
   if (!rawBoy || typeof rawBoy !== 'object') {
@@ -56,25 +128,51 @@ export function normalizeCompanionRecord(rawBoy, index = 0) {
   const id = String(rawBoy.id || `anon-${index}`);
   const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`;
 
-  const rawPublicList = Array.isArray(rawBoy.publicPhotos)
+  const rawPubPhotos = Array.isArray(rawBoy.publicPhotos)
     ? rawBoy.publicPhotos.filter((url) => typeof url === 'string' && url.trim().length > 0)
     : [];
-
   if (
-    rawPublicList.length === 0 &&
+    rawPubPhotos.length === 0 &&
     typeof rawBoy.publicPhoto === 'string' &&
     rawBoy.publicPhoto.trim().length > 0
   ) {
-    rawPublicList.push(rawBoy.publicPhoto.trim());
+    rawPubPhotos.push(rawBoy.publicPhoto.trim());
+  }
+
+  const rawPubIds = Array.isArray(rawBoy.publicFileIds)
+    ? rawBoy.publicFileIds.filter((fid) => typeof fid === 'string' && fid.trim().length > 0)
+    : [];
+
+  const pubCount = Math.max(rawPubPhotos.length, rawPubIds.length);
+  const resolvedPublicList = [];
+  for (let i = 0; i < pubCount; i++) {
+    const resolved = resolveMediaUrl(rawPubPhotos[i] || '', rawPubIds[i] || '', 'photo');
+    if (resolved) resolvedPublicList.push(resolved);
   }
 
   const fallbackImg = FALLBACK_PORTRAITS[index % FALLBACK_PORTRAITS.length];
-  const publicPhotos = rawPublicList.length > 0 ? rawPublicList : [fallbackImg];
+  const publicPhotos = resolvedPublicList.length > 0 ? resolvedPublicList : [fallbackImg];
   const primaryPhoto = publicPhotos[0];
 
-  const privatePhotos = Array.isArray(rawBoy.privatePhotos)
+  const rawPrivPhotos = Array.isArray(rawBoy.privatePhotos)
     ? rawBoy.privatePhotos.filter((url) => typeof url === 'string' && url.trim().length > 0)
     : [];
+  const rawPrivIds = Array.isArray(rawBoy.privateFileIds)
+    ? rawBoy.privateFileIds.filter((fid) => typeof fid === 'string' && fid.trim().length > 0)
+    : [];
+
+  const privCount = Math.max(rawPrivPhotos.length, rawPrivIds.length);
+  const privatePhotos = [];
+  for (let i = 0; i < privCount; i++) {
+    const resolved = resolveMediaUrl(rawPrivPhotos[i] || '', rawPrivIds[i] || '', 'photo');
+    if (resolved) privatePhotos.push(resolved);
+  }
+
+  const privateVideo = resolveMediaUrl(
+    rawBoy.privateVideo || '',
+    rawBoy.privateVideoFileId || '',
+    'video'
+  );
 
   return {
     ...rawBoy,
@@ -88,8 +186,10 @@ export function normalizeCompanionRecord(rawBoy, index = 0) {
     township: rawBoy.township ? String(rawBoy.township).trim() : 'Central',
     publicPhotos,
     primaryPhoto,
-    hasUploadedPhoto: rawPublicList.length > 0,
+    hasUploadedPhoto: resolvedPublicList.length > 0,
     privatePhotos,
+    privateVideo,
+    hasLegacyTelegramLinks: isLegacyExpiredProneTelegramMedia(rawBoy),
   };
 }
 

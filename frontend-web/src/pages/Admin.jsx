@@ -14,6 +14,7 @@ import {
   setDoc,
   serverTimestamp,
 } from 'firebase/firestore';
+import imageCompression from 'browser-image-compression';
 import {
   UserCheck,
   Clock,
@@ -41,8 +42,14 @@ import {
   Calendar,
   AlertCircle,
   ArrowLeft,
+  UploadCloud,
+  Send,
 } from 'lucide-react';
-import { FALLBACK_PORTRAITS } from '../utils/catalogLogic';
+import {
+  FALLBACK_PORTRAITS,
+  resolveMediaUrl,
+  isLegacyExpiredProneTelegramMedia,
+} from '../utils/catalogLogic';
 
 const DateBoyCard = ({
   boy,
@@ -57,19 +64,47 @@ const DateBoyCard = ({
   handleToggleVisibility,
   startEditBoy,
   setModalImage,
+  handleAdminPhotoUpload,
+  isUploadingEditPhoto,
+  requestTelegramMediaReupload,
 }) => {
-  const pPhotos = Array.isArray(boy.publicPhotos)
+  const [brokenImgDetected, setBrokenImgDetected] = useState(false);
+
+  const rawPubPhotos = Array.isArray(boy.publicPhotos)
     ? boy.publicPhotos
     : boy.publicPhoto
       ? [boy.publicPhoto]
       : [];
-  const prPhotos = Array.isArray(boy.privatePhotos)
+  const rawPubIds = Array.isArray(boy.publicFileIds) ? boy.publicFileIds : [];
+  const pubCount = Math.max(rawPubPhotos.length, rawPubIds.length);
+  const pPhotos = [];
+  for (let i = 0; i < pubCount; i++) {
+    const resolved = resolveMediaUrl(rawPubPhotos[i] || '', rawPubIds[i] || '', 'photo');
+    if (resolved) pPhotos.push(resolved);
+  }
+
+  const rawPrivPhotos = Array.isArray(boy.privatePhotos)
     ? boy.privatePhotos
     : boy.privatePhotos
       ? [boy.privatePhotos]
       : [];
+  const rawPrivIds = Array.isArray(boy.privateFileIds) ? boy.privateFileIds : [];
+  const privCount = Math.max(rawPrivPhotos.length, rawPrivIds.length);
+  const prPhotos = [];
+  for (let i = 0; i < privCount; i++) {
+    const resolved = resolveMediaUrl(rawPrivPhotos[i] || '', rawPrivIds[i] || '', 'photo');
+    if (resolved) prPhotos.push(resolved);
+  }
+
+  const videoUrl = resolveMediaUrl(
+    boy.privateVideo || '',
+    boy.privateVideoFileId || '',
+    'video'
+  );
+
   const isEditing = editingBoyId === boy.id;
   const boyCode = `WLDB-${boy.id.substring(0, 5).toUpperCase()}`;
+  const hasLegacyLinks = isLegacyExpiredProneTelegramMedia(boy) || brokenImgDetected;
 
   return (
     <div
@@ -151,6 +186,51 @@ const DateBoyCard = ({
               className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E]"
               placeholder="လိပ်စာ"
             />
+
+            {/* Direct Public & Private Photo Replacement in Edit Mode */}
+            <div className="pt-2 border-t border-[#E6DFD3] space-y-2.5">
+              <div>
+                <label className="block text-[11px] font-semibold text-[#0C0D0E] mb-1">
+                  Public ပုံအသစ် လဲလှယ်ရန် ({(editBoyData.publicPhotos || []).length} ပုံ)
+                </label>
+                <label className="flex items-center justify-center gap-1.5 w-full py-2 px-3 bg-white border border-dashed border-[#C5A059] rounded-lg text-xs font-semibold text-[#9E7B36] cursor-pointer hover:bg-[#F5EFE6] transition-colors">
+                  <UploadCloud size={14} />
+                  <span>
+                    {isUploadingEditPhoto === 'public'
+                      ? 'Compressing...'
+                      : 'Public ပုံအသစ်များ ရွေးမည်'}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleAdminPhotoUpload(e, 'public')}
+                  />
+                </label>
+              </div>
+
+              <div>
+                <label className="block text-[11px] font-semibold text-[#0C0D0E] mb-1">
+                  Private ပုံအသစ် လဲလှယ်ရန် ({(editBoyData.privatePhotos || []).length} ပုံ)
+                </label>
+                <label className="flex items-center justify-center gap-1.5 w-full py-2 px-3 bg-white border border-dashed border-[#C5A059] rounded-lg text-xs font-semibold text-[#9E7B36] cursor-pointer hover:bg-[#F5EFE6] transition-colors">
+                  <UploadCloud size={14} />
+                  <span>
+                    {isUploadingEditPhoto === 'private'
+                      ? 'Compressing...'
+                      : 'Private ပုံအသစ်များ ရွေးမည်'}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/*"
+                    multiple
+                    className="hidden"
+                    onChange={(e) => handleAdminPhotoUpload(e, 'private')}
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         ) : (
           <>
@@ -161,7 +241,6 @@ const DateBoyCard = ({
               <h4 className="font-serif text-2xl font-semibold text-[#0C0D0E] mt-0.5">
                 {boy.name}
               </h4>
-              {/* Unboxed clean metadata with middle-dot separators */}
               <div className="flex flex-wrap items-center gap-1.5 text-xs text-[#5C564E] mt-1.5 font-medium tabular-nums">
                 <span className="text-[#0C0D0E] font-semibold">{boy.age} Yrs</span>
                 <span aria-hidden="true">·</span>
@@ -170,6 +249,24 @@ const DateBoyCard = ({
                 <span className="text-[#9E7B36] font-mono">Size: {boy.cockSize || 'N/A'}</span>
               </div>
             </div>
+
+            {hasLegacyLinks && (
+              <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-2">
+                <p className="font-semibold leading-relaxed">
+                  ⚠️ ယခင် Telegram (၁) နာရီသက်တမ်းကုန် Link အဟောင်း ဖြစ်နေပါသည်။ Edit နှိပ်၍ ပုံအသစ်တင်ပါ သို့မဟုတ် Date Boy ထံ ပုံပြန်တောင်းပါ။
+                </p>
+                {boy.telegramChatId && (
+                  <button
+                    type="button"
+                    onClick={() => requestTelegramMediaReupload(boy)}
+                    className="w-full py-1.5 px-2.5 bg-amber-900 text-white rounded font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-950 transition-colors"
+                  >
+                    <Send size={12} />
+                    <span>Telegram မှ ပုံအသစ်ပြန်တောင်းမည်</span>
+                  </button>
+                )}
+              </div>
+            )}
 
             <div className="bg-[#FAF8F5] p-3.5 rounded-lg text-xs mb-5 border border-[#E6DFD3] space-y-1.5">
               <p className="text-[#0C0D0E] font-medium flex items-center gap-2">
@@ -211,6 +308,7 @@ const DateBoyCard = ({
                     alt=""
                     referrerPolicy="no-referrer"
                     onError={(e) => {
+                      setBrokenImgDetected(true);
                       e.currentTarget.src = FALLBACK_PORTRAITS[idx % FALLBACK_PORTRAITS.length];
                     }}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -241,6 +339,7 @@ const DateBoyCard = ({
                     alt=""
                     referrerPolicy="no-referrer"
                     onError={(e) => {
+                      setBrokenImgDetected(true);
                       e.currentTarget.src = FALLBACK_PORTRAITS[idx % FALLBACK_PORTRAITS.length];
                     }}
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
@@ -254,10 +353,10 @@ const DateBoyCard = ({
           </div>
         </div>
 
-        {boy.privateVideo && (
+        {videoUrl && (
           <div className="mb-5">
             <a
-              href={boy.privateVideo}
+              href={videoUrl}
               target="_blank"
               rel="noreferrer"
               className="inline-flex items-center gap-2 text-xs bg-[#F5EFE6] text-[#0C0D0E] px-3.5 py-2 rounded-lg font-semibold border border-[#E6DFD3] hover:bg-[#E6DFD3] transition-colors"
@@ -270,24 +369,7 @@ const DateBoyCard = ({
       </div>
 
       <div className="flex items-center gap-2 pt-4 border-t border-[#EFECE6]">
-        {isPending ? (
-          <>
-            <button
-              type="button"
-              onClick={() => handleApprove(boy.id)}
-              className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-2.5 rounded-lg font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors text-xs"
-            >
-              Approve Dossier
-            </button>
-            <button
-              type="button"
-              onClick={() => openRejectOrDeleteModal(boy)}
-              className="flex-1 bg-rose-50 text-rose-700 py-2.5 rounded-lg font-semibold hover:bg-rose-100 transition-colors text-xs border border-rose-200"
-            >
-              Reject
-            </button>
-          </>
-        ) : isEditing ? (
+        {isEditing ? (
           <div className="w-full flex gap-2">
             <button
               type="button"
@@ -305,6 +387,32 @@ const DateBoyCard = ({
               Cancel
             </button>
           </div>
+        ) : isPending ? (
+          <>
+            <button
+              type="button"
+              onClick={() => handleApprove(boy.id)}
+              className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-2.5 rounded-lg font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors text-xs"
+            >
+              Approve
+            </button>
+            <button
+              type="button"
+              onClick={() => startEditBoy(boy)}
+              aria-label={`Edit ${boy.name}`}
+              className="px-3 bg-[#FAF8F5] text-[#0C0D0E] py-2.5 rounded-lg font-semibold hover:bg-[#F5EFE6] border border-[#E6DFD3] text-xs flex justify-center items-center gap-1 transition-colors"
+            >
+              <Pencil size={13} />
+              <span>Edit</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => openRejectOrDeleteModal(boy)}
+              className="px-3 bg-rose-50 text-rose-700 py-2.5 rounded-lg font-semibold hover:bg-rose-100 transition-colors text-xs border border-rose-200"
+            >
+              Reject
+            </button>
+          </>
         ) : (
           <>
             <button
@@ -394,6 +502,7 @@ export default function Admin() {
   const [editTownship, setEditTownship] = useState('');
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
+  const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState('');
 
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '',
@@ -670,13 +779,87 @@ export default function Admin() {
       city: boy.city,
       township: boy.township,
       address: boy.address,
+      publicPhotos: Array.isArray(boy.publicPhotos)
+        ? boy.publicPhotos
+        : boy.publicPhoto
+          ? [boy.publicPhoto]
+          : [],
+      privatePhotos: Array.isArray(boy.privatePhotos) ? boy.privatePhotos : [],
     });
+  };
+
+  const handleAdminPhotoUpload = async (e, photoType) => {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setIsUploadingEditPhoto(photoType);
+    const compressedList = [];
+    for (const file of files) {
+      try {
+        const compressedFile = await imageCompression(file, {
+          maxSizeMB: 0.3,
+          maxWidthOrHeight: 1024,
+          useWebWorker: true,
+        });
+        const base64 = await new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.readAsDataURL(compressedFile);
+          reader.onloadend = () => resolve(reader.result);
+        });
+        compressedList.push(base64);
+      } catch (err) {
+        console.error('Admin photo compression error:', err);
+      }
+    }
+    if (compressedList.length > 0) {
+      if (photoType === 'public') {
+        setEditBoyData((prev) => ({
+          ...prev,
+          publicPhotos: compressedList,
+          publicPhoto: compressedList[0] || '',
+          publicFileIds: [],
+        }));
+      } else {
+        setEditBoyData((prev) => ({
+          ...prev,
+          privatePhotos: compressedList,
+          privateFileIds: [],
+        }));
+      }
+      showToast(
+        `${photoType === 'public' ? 'Public' : 'Private'} ပုံ (${compressedList.length}) ပုံ ရွေးချယ်ပြီးပါပြီ။ Save နှိပ်၍ သိမ်းဆည်းပါ။`,
+        'info'
+      );
+    }
+    setIsUploadingEditPhoto('');
+    e.target.value = '';
+  };
+
+  const requestTelegramMediaReupload = async (boy) => {
+    if (!boy || !boy.telegramChatId) return;
+    try {
+      await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_action: 'request_media_reupload',
+          boyId: boy.id,
+          chatId: boy.telegramChatId,
+        }),
+      });
+      showToast(
+        `${boy.name} ထံသို့ Telegram မှတစ်ဆင့် ဓာတ်ပုံနှင့် Video အသစ်ပြန်လည်ပေးပို့ရန် အကြောင်းကြားစာ ပို့လိုက်ပါပြီ။`,
+        'success'
+      );
+    } catch (err) {
+      console.error(err);
+      showToast('Telegram သို့ အကြောင်းကြားစာ ပို့ရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။', 'error');
+    }
   };
 
   const saveEditedBoy = async (id) => {
     await updateDoc(doc(db, 'dateboys', id), editBoyData);
     setEditingBoyId(null);
-    showToast('Companion dossier updated.', 'success');
+    showToast('Companion dossier & media updated.', 'success');
   };
 
   const handleAddLocation = async (e) => {
@@ -1017,6 +1200,9 @@ export default function Admin() {
                       handleToggleVisibility={handleToggleVisibility}
                       startEditBoy={startEditBoy}
                       setModalImage={setModalImage}
+                      handleAdminPhotoUpload={handleAdminPhotoUpload}
+                      isUploadingEditPhoto={isUploadingEditPhoto}
+                      requestTelegramMediaReupload={requestTelegramMediaReupload}
                     />
                   ))}
                 </div>
@@ -1055,6 +1241,9 @@ export default function Admin() {
                       handleToggleVisibility={handleToggleVisibility}
                       startEditBoy={startEditBoy}
                       setModalImage={setModalImage}
+                      handleAdminPhotoUpload={handleAdminPhotoUpload}
+                      isUploadingEditPhoto={isUploadingEditPhoto}
+                      requestTelegramMediaReupload={requestTelegramMediaReupload}
                     />
                   ))}
                 </div>
