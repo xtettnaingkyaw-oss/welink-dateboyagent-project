@@ -12,7 +12,7 @@ import {
   Lock,
   ArrowLeft,
 } from 'lucide-react';
-import { validateRegistrationForm } from '../utils/catalogLogic';
+import { BRAND_LOGO_URL, validateRegistrationForm } from '../utils/catalogLogic';
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -54,7 +54,9 @@ export default function Register() {
   }, []);
 
   const activeLocations = locations.filter((l) => l.status !== 'pending');
-  const cities = [...new Set(['Yangon', 'Mandalay', ...activeLocations.map((l) => l.city).filter(Boolean)])];
+  const cities = [
+    ...new Set(['Yangon', 'Mandalay', ...activeLocations.map((l) => l.city).filter(Boolean)]),
+  ];
   const townships = [
     ...new Set(
       activeLocations
@@ -172,29 +174,32 @@ export default function Register() {
   if (isSuccess) {
     return (
       <div className="max-w-xl mx-auto px-4 py-16 sm:py-24 text-center">
-        <div className="bg-white rounded-2xl border border-[#E6DFD3] p-8 sm:p-12 space-y-6">
-          <div className="w-16 h-16 bg-[#F5EFE6] border border-[#C5A059] rounded-full flex items-center justify-center mx-auto text-[#9E7B36]">
-            <CheckCircle2 className="w-8 h-8" />
-          </div>
-          <div className="space-y-2">
-            <p className="font-mono text-xs tracking-widest text-[#9E7B36] font-semibold">
-              DOSSIER REGISTERED FOR EXECUTIVE REVIEW
-            </p>
-            <h1 className="font-serif text-3xl sm:text-4xl font-semibold text-[#0C0D0E]">
-              လျှောက်ထားမှု အောင်မြင်ပါသည်
-            </h1>
-            <p className="text-[#5C564E] text-sm leading-relaxed max-w-md mx-auto">
-              သင့်အချက်အလက်နှင့် ဓာတ်ပုံများကို WE LINK Management မှ လက်ခံရရှိပြီးပါပြီ။ စစ်ဆေးအတည်ပြုပြီးပါက ဆက်သွယ်ပေးပါမည်။
-            </p>
-          </div>
-          <div className="pt-2">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-2 px-6 py-3.5 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs sm:text-sm font-semibold hover:bg-[#1E2126] transition-colors"
-            >
-              <ArrowLeft size={15} />
-              <span>Return to Companion Directory</span>
-            </Link>
+        <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
+          <div className="h-1.5 w-full welink-spectrum-bar" />
+          <div className="p-8 sm:p-12 space-y-6">
+            <div className="w-16 h-16 bg-emerald-50 border border-emerald-200 rounded-full flex items-center justify-center mx-auto text-emerald-600">
+              <CheckCircle2 className="w-8 h-8" />
+            </div>
+            <div className="space-y-2">
+              <p className="font-mono text-xs tracking-widest text-emerald-700 font-semibold">
+                DOSSIER REGISTERED FOR EXECUTIVE REVIEW
+              </p>
+              <h1 className="font-serif text-3xl sm:text-4xl font-semibold text-slate-900">
+                လျှောက်ထားမှု အောင်မြင်ပါသည်
+              </h1>
+              <p className="text-slate-600 text-sm leading-relaxed max-w-md mx-auto">
+                သင့်အချက်အလက်နှင့် ဓာတ်ပုံများကို WE LINK Management မှ လက်ခံရရှိပြီးပါပြီ။ စစ်ဆေးအတည်ပြုပြီးပါက ဆက်သွယ်ပေးပါမည်။
+              </p>
+            </div>
+            <div className="pt-2">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-2 px-6 py-3.5 rounded-xl welink-brand-gradient text-slate-950 text-xs sm:text-sm font-bold hover:opacity-95 transition-opacity"
+              >
+                <ArrowLeft size={15} />
+                <span>Return to Companion Directory</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -203,24 +208,36 @@ export default function Register() {
 
   return (
     <div className="max-w-4xl mx-auto px-4 sm:px-8 py-8 sm:py-12">
-      <div className="bg-white rounded-2xl border border-[#E6DFD3] overflow-hidden">
-        {/* Luxury Editorial Header */}
-        <div className="bg-[#0C0D0E] text-[#FAF8F5] p-8 sm:p-12 border-b border-[#262420]">
-          <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-            <div className="space-y-2">
-              <p className="font-mono text-xs tracking-[0.2em] text-[#C5A059] font-semibold">
-                CONFIDENTIAL TALENT ONBOARDING
+      <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
+        <div className="h-1.5 w-full welink-spectrum-bar" />
+        {/* Luxury Brand Header */}
+        <div className="bg-gradient-to-br from-[#0B1120] via-[#0F172A] to-[#062E22] text-white p-8 sm:p-12 border-b border-slate-800">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-6">
+            <div className="space-y-2.5">
+              <p className="font-mono text-xs tracking-[0.2em] text-amber-300 font-semibold">
+                WE LINK · ALL OF YOU · TALENT ONBOARDING
               </p>
-              <h1 className="font-serif text-3xl sm:text-5xl font-medium text-[#FAF8F5]">
+              <h1 className="font-serif text-3xl sm:text-5xl font-medium text-white">
                 Companion Application Dossier
               </h1>
-              <p className="text-[#B8B2A6] text-xs sm:text-sm max-w-xl leading-relaxed">
+              <p className="text-slate-300 text-xs sm:text-sm max-w-xl leading-relaxed">
                 WE LINK ၏ Date Boy အဖြစ် ပါဝင်လိုသူများအတွက် လျှို့ဝှက်လျှောက်လွှာ။ Public ပုံ နှင့် Private ပုံ အနည်းဆုံး (၃) ပုံစီ တင်ပေးရန် လိုအပ်ပါသည်။
               </p>
             </div>
-            <div className="shrink-0 flex items-center gap-2 text-xs text-[#C5A059] font-mono">
-              <Lock size={14} />
-              <span>ENCRYPTED SUBMISSION</span>
+            <div className="shrink-0 flex items-center gap-3 bg-white/10 backdrop-blur-md border border-white/15 p-2.5 rounded-2xl self-start">
+              <img
+                src={BRAND_LOGO_URL}
+                alt="WE LINK All Of You Logo"
+                className="w-14 h-14 object-contain rounded-xl bg-white p-1 shadow-sm"
+              />
+              <div className="pr-2 hidden sm:block">
+                <span className="font-serif text-base font-bold tracking-widest text-white block">
+                  WE LINK
+                </span>
+                <span className="font-mono text-[10px] tracking-[0.18em] text-emerald-300 block">
+                  ALL OF YOU
+                </span>
+              </div>
             </div>
           </div>
         </div>
@@ -228,11 +245,11 @@ export default function Register() {
         <form onSubmit={handleSubmit} noValidate className="p-6 sm:p-10 lg:p-12 space-y-10">
           {/* Section 01: Personal & Physical Dossier */}
           <section className="space-y-5">
-            <div className="border-b border-[#E6DFD3] pb-3">
-              <h2 className="font-serif text-2xl font-semibold text-[#0C0D0E]">
+            <div className="border-b border-slate-200 pb-3">
+              <h2 className="font-serif text-2xl font-semibold text-slate-900">
                 01. Personal & Physical Specifications
               </h2>
-              <p className="text-xs text-[#6E675F] mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Provide accurate measurements and contact credentials for concierge verification.
               </p>
             </div>
@@ -241,7 +258,7 @@ export default function Register() {
               <div>
                 <label
                   htmlFor="reg-name"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Stage Name or Full Name (အမည်) *
                 </label>
@@ -253,14 +270,14 @@ export default function Register() {
                   value={formData.name}
                   placeholder="ဥပမာ — Julian / အောင်အောင်"
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-[#FAF8F5] border border-[#E6DFD3] focus:border-[#0C0D0E] focus:bg-white outline-none text-sm transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm transition-colors"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="reg-age"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Age (အသက်) *
                 </label>
@@ -274,14 +291,14 @@ export default function Register() {
                   value={formData.age}
                   placeholder="25"
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-[#FAF8F5] border border-[#E6DFD3] focus:border-[#0C0D0E] focus:bg-white outline-none text-sm font-mono tabular-nums transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm font-mono tabular-nums transition-colors"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="reg-height"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Height (အရပ်အမြင့်) *
                 </label>
@@ -293,14 +310,14 @@ export default function Register() {
                   value={formData.height}
                   placeholder="5' 11&quot;"
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-[#FAF8F5] border border-[#E6DFD3] focus:border-[#0C0D0E] focus:bg-white outline-none text-sm font-mono transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm font-mono transition-colors"
                 />
               </div>
 
               <div>
                 <label
                   htmlFor="reg-cocksize"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Private Measurement / Size (လက်မဖြင့်)
                 </label>
@@ -311,14 +328,14 @@ export default function Register() {
                   value={formData.cockSize}
                   placeholder="6.5&quot; (Admin စစ်ဆေးရန်)"
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-[#FAF8F5] border border-[#E6DFD3] focus:border-[#0C0D0E] focus:bg-white outline-none text-sm font-mono transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm font-mono transition-colors"
                 />
               </div>
 
               <div className="sm:col-span-2">
                 <label
                   htmlFor="reg-phone"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Direct Phone / Telegram Contact (ဆက်သွယ်ရန် ဖုန်းနံပါတ်) *
                 </label>
@@ -330,7 +347,7 @@ export default function Register() {
                   value={formData.phone}
                   placeholder="09xxxxxxxxx"
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-[#FAF8F5] border border-[#E6DFD3] focus:border-[#0C0D0E] focus:bg-white outline-none text-sm font-mono tabular-nums transition-colors"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm font-mono tabular-nums transition-colors"
                 />
               </div>
             </div>
@@ -338,20 +355,20 @@ export default function Register() {
 
           {/* Section 02: Residency & Service Jurisdiction */}
           <section className="space-y-5">
-            <div className="border-b border-[#E6DFD3] pb-3">
-              <h2 className="font-serif text-2xl font-semibold text-[#0C0D0E]">
+            <div className="border-b border-slate-200 pb-3">
+              <h2 className="font-serif text-2xl font-semibold text-slate-900">
                 02. Residency & Service Jurisdiction
               </h2>
-              <p className="text-xs text-[#6E675F] mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Select your primary city and township. Exact residential addresses remain strictly private.
               </p>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-[#FAF8F5] p-5 rounded-xl border border-[#E6DFD3]">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-5 bg-slate-50/90 p-5 rounded-xl border border-slate-200/80">
               <div>
                 <label
                   htmlFor="reg-city"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   City / မြို့ ရွေးချယ်ရန် *
                 </label>
@@ -361,7 +378,7 @@ export default function Register() {
                   required
                   value={formData.city}
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-white border border-[#E6DFD3] focus:border-[#0C0D0E] outline-none text-sm cursor-pointer"
+                  className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-amber-500 outline-none text-sm cursor-pointer"
                 >
                   <option value="">-- မြို့ရွေးပါ --</option>
                   {cities.map((c) => (
@@ -379,7 +396,7 @@ export default function Register() {
                     required
                     value={customCity}
                     onChange={(e) => setCustomCity(e.target.value)}
-                    className="w-full px-4 py-3 mt-3 rounded-lg bg-white border border-[#C5A059] outline-none text-sm"
+                    className="w-full px-4 py-3 mt-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
                   />
                 )}
               </div>
@@ -387,7 +404,7 @@ export default function Register() {
               <div>
                 <label
                   htmlFor="reg-township"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Township / မြို့နယ် ရွေးချယ်ရန် *
                 </label>
@@ -399,7 +416,7 @@ export default function Register() {
                     required
                     value={customTownship}
                     onChange={(e) => setCustomTownship(e.target.value)}
-                    className="w-full px-4 py-3 rounded-lg bg-white border border-[#C5A059] outline-none text-sm"
+                    className="w-full px-4 py-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
                   />
                 ) : (
                   <>
@@ -410,7 +427,7 @@ export default function Register() {
                       value={formData.township}
                       onChange={handleChange}
                       disabled={!formData.city}
-                      className="w-full px-4 py-3 rounded-lg bg-white border border-[#E6DFD3] focus:border-[#0C0D0E] outline-none text-sm cursor-pointer disabled:opacity-50"
+                      className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-emerald-500 outline-none text-sm cursor-pointer disabled:opacity-50"
                     >
                       <option value="">
                         {formData.city ? '-- မြို့နယ်ရွေးပါ --' : 'အရင်ဆုံး မြို့ကိုရွေးပါ'}
@@ -432,7 +449,7 @@ export default function Register() {
                         required
                         value={customTownship}
                         onChange={(e) => setCustomTownship(e.target.value)}
-                        className="w-full px-4 py-3 mt-3 rounded-lg bg-white border border-[#C5A059] outline-none text-sm"
+                        className="w-full px-4 py-3 mt-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
                       />
                     )}
                   </>
@@ -442,7 +459,7 @@ export default function Register() {
               <div className="sm:col-span-2">
                 <label
                   htmlFor="reg-address"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Confidential Residential Address (လိပ်စာအပြည့်အစုံ — Admin သာမြင်ရပါမည်) *
                 </label>
@@ -454,14 +471,14 @@ export default function Register() {
                   value={formData.address}
                   placeholder="အမှတ်၊ လမ်း၊ ရပ်ကွက်..."
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-white border border-[#E6DFD3] focus:border-[#0C0D0E] outline-none text-sm"
+                  className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-amber-500 outline-none text-sm"
                 />
               </div>
 
               <div className="sm:col-span-2">
                 <label
                   htmlFor="reg-bio"
-                  className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                  className="block text-xs font-semibold text-slate-800 mb-1.5"
                 >
                   Brief Companion Bio / Languages & Interests (မိတ်ဆက်အကျဉ်း)
                 </label>
@@ -472,7 +489,7 @@ export default function Register() {
                   value={formData.bio}
                   placeholder="ဥပမာ — English/Myanmar speaking, fitness enthusiast, available for dinner & social events..."
                   onChange={handleChange}
-                  className="w-full px-4 py-3 rounded-lg bg-white border border-[#E6DFD3] focus:border-[#0C0D0E] outline-none text-sm"
+                  className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-amber-500 outline-none text-sm"
                 />
               </div>
             </div>
@@ -480,40 +497,40 @@ export default function Register() {
 
           {/* Section 03: Visual Portfolio Uploaders */}
           <section className="space-y-5">
-            <div className="border-b border-[#E6DFD3] pb-3">
-              <h2 className="font-serif text-2xl font-semibold text-[#0C0D0E]">
+            <div className="border-b border-slate-200 pb-3">
+              <h2 className="font-serif text-2xl font-semibold text-slate-900">
                 03. Visual Portfolio & Verification Media
               </h2>
-              <p className="text-xs text-[#6E675F] mt-0.5">
+              <p className="text-xs text-slate-500 mt-0.5">
                 Upload a minimum of 3 Public Portraits and 3 Private Verification Photos. Images are automatically optimized on-device.
               </p>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               {/* Public Portraits Upload Box */}
-              <div className="bg-[#FAF8F5] rounded-xl border border-[#E6DFD3] p-5 space-y-4">
+              <div className="bg-slate-50/90 rounded-xl border border-slate-200 p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-[#0C0D0E]">
+                    <h3 className="text-sm font-semibold text-slate-900">
                       Public Directory Portraits
                     </h3>
-                    <p className="text-xs text-[#6E675F]">
+                    <p className="text-xs text-slate-500">
                       မျက်နှာနှင့် စတိုင်လ် သေချာမြင်ရသော အလှပုံ (အနည်းဆုံး ၃ ပုံ)
                     </p>
                   </div>
-                  <span className="font-mono text-xs font-semibold text-[#0C0D0E] tabular-nums">
+                  <span className="font-mono text-xs font-semibold text-amber-600 tabular-nums">
                     {publicPhotos.length} / 3 Min
                   </span>
                 </div>
 
-                <label className="block border border-dashed border-[#C5A059] bg-white hover:bg-[#F5EFE6]/60 transition-colors rounded-lg p-6 text-center cursor-pointer">
-                  <UploadCloud className="w-7 h-7 text-[#9E7B36] mx-auto mb-2" />
-                  <span className="block text-xs font-semibold text-[#0C0D0E]">
+                <label className="block border border-dashed border-amber-400 bg-white hover:bg-amber-50/40 transition-colors rounded-xl p-6 text-center cursor-pointer">
+                  <UploadCloud className="w-7 h-7 text-amber-500 mx-auto mb-2" />
+                  <span className="block text-xs font-semibold text-slate-900">
                     {compressingType === 'public'
                       ? 'Optimizing Portraits...'
                       : 'Select Public Portraits (Multiple Allowed)'}
                   </span>
-                  <span className="block text-[11px] text-[#787167] mt-1">
+                  <span className="block text-[11px] text-slate-500 mt-1">
                     JPG, PNG, WEBP · Auto-compressed
                   </span>
                   <input
@@ -530,7 +547,7 @@ export default function Register() {
                     {publicPhotos.map((imgSrc, idx) => (
                       <div
                         key={idx}
-                        className="relative aspect-[3/4] rounded-lg overflow-hidden bg-[#141619] border border-[#E6DFD3] group"
+                        className="relative aspect-[3/4] rounded-lg overflow-hidden bg-slate-900 border border-slate-200 group"
                       >
                         <img
                           src={imgSrc}
@@ -541,7 +558,7 @@ export default function Register() {
                           type="button"
                           onClick={() => removePhotoAt(setPublicPhotos, idx)}
                           aria-label={`Remove public photo ${idx + 1}`}
-                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#0C0D0E]/80 text-[#FAF8F5] flex items-center justify-center hover:bg-rose-600 transition-colors"
+                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-950/80 text-white flex items-center justify-center hover:bg-rose-600 transition-colors"
                         >
                           <X size={13} />
                         </button>
@@ -552,30 +569,30 @@ export default function Register() {
               </div>
 
               {/* Private Verification Photos Upload Box */}
-              <div className="bg-[#FAF8F5] rounded-xl border border-[#E6DFD3] p-5 space-y-4">
+              <div className="bg-slate-50/90 rounded-xl border border-slate-200 p-5 space-y-4">
                 <div className="flex items-center justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-[#0C0D0E] flex items-center gap-1.5">
-                      <Lock size={13} className="text-[#9E7B36]" />
+                    <h3 className="text-sm font-semibold text-slate-900 flex items-center gap-1.5">
+                      <Lock size={13} className="text-emerald-600" />
                       <span>Private Verification Gallery</span>
                     </h3>
-                    <p className="text-xs text-[#6E675F]">
+                    <p className="text-xs text-slate-500">
                       Admin နှင့် VIP Client ID များသာ ကြည့်ရှုနိုင်သော Private ပုံ (အနည်းဆုံး ၃ ပုံ)
                     </p>
                   </div>
-                  <span className="font-mono text-xs font-semibold text-[#0C0D0E] tabular-nums">
+                  <span className="font-mono text-xs font-semibold text-emerald-600 tabular-nums">
                     {privatePhotos.length} / 3 Min
                   </span>
                 </div>
 
-                <label className="block border border-dashed border-[#0C0D0E]/40 bg-white hover:bg-[#F5EFE6]/60 transition-colors rounded-lg p-6 text-center cursor-pointer">
-                  <UploadCloud className="w-7 h-7 text-[#0C0D0E] mx-auto mb-2" />
-                  <span className="block text-xs font-semibold text-[#0C0D0E]">
+                <label className="block border border-dashed border-emerald-500/60 bg-white hover:bg-emerald-50/40 transition-colors rounded-xl p-6 text-center cursor-pointer">
+                  <UploadCloud className="w-7 h-7 text-emerald-600 mx-auto mb-2" />
+                  <span className="block text-xs font-semibold text-slate-900">
                     {compressingType === 'private'
                       ? 'Encrypting & Optimizing...'
                       : 'Select Private Verification Photos'}
                   </span>
-                  <span className="block text-[11px] text-[#787167] mt-1">
+                  <span className="block text-[11px] text-slate-500 mt-1">
                     Strictly Confidential · Never shown on public web
                   </span>
                   <input
@@ -592,7 +609,7 @@ export default function Register() {
                     {privatePhotos.map((imgSrc, idx) => (
                       <div
                         key={idx}
-                        className="relative aspect-[3/4] rounded-lg overflow-hidden bg-[#141619] border border-[#E6DFD3] group"
+                        className="relative aspect-[3/4] rounded-lg overflow-hidden bg-slate-900 border border-slate-200 group"
                       >
                         <img
                           src={imgSrc}
@@ -603,7 +620,7 @@ export default function Register() {
                           type="button"
                           onClick={() => removePhotoAt(setPrivatePhotos, idx)}
                           aria-label={`Remove private photo ${idx + 1}`}
-                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-[#0C0D0E]/80 text-[#FAF8F5] flex items-center justify-center hover:bg-rose-600 transition-colors"
+                          className="absolute top-1.5 right-1.5 w-6 h-6 rounded-full bg-slate-950/80 text-white flex items-center justify-center hover:bg-rose-600 transition-colors"
                         >
                           <X size={13} />
                         </button>
@@ -616,9 +633,9 @@ export default function Register() {
           </section>
 
           {/* Section 04: Governance & Discretion Consent */}
-          <section className="bg-[#FAF8F5] rounded-xl border border-[#E6DFD3] p-5 sm:p-6 space-y-3">
-            <div className="flex items-center gap-2 text-xs font-semibold text-[#0C0D0E] mb-1">
-              <ShieldCheck size={16} className="text-[#9E7B36]" />
+          <section className="bg-slate-50/90 rounded-xl border border-slate-200 p-5 sm:p-6 space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold text-slate-900 mb-1">
+              <ShieldCheck size={16} className="text-emerald-600" />
               <span>04. Agency Governance & Privacy Consent</span>
             </div>
 
@@ -630,9 +647,9 @@ export default function Register() {
                   setAgreeTerms(e.target.checked);
                   setValidationError(null);
                 }}
-                className="mt-1 w-4 h-4 accent-[#0C0D0E] rounded"
+                className="mt-1 w-4 h-4 accent-emerald-600 rounded"
               />
-              <span className="text-xs sm:text-sm text-[#4A453E]">
+              <span className="text-xs sm:text-sm text-slate-600">
                 WE LINK Agency ၏ စည်းမျဉ်းစည်းကမ်းများ (Terms and Conditions) နှင့် အသက် ၁၈ နှစ်ပြည့်ပြီးကြောင်း အတည်ပြုသဘောတူပါသည်။
               </span>
             </label>
@@ -645,15 +662,15 @@ export default function Register() {
                   setAgreePrivacy(e.target.checked);
                   setValidationError(null);
                 }}
-                className="mt-1 w-4 h-4 accent-[#0C0D0E] rounded"
+                className="mt-1 w-4 h-4 accent-emerald-600 rounded"
               />
-              <span className="text-xs sm:text-sm text-[#4A453E]">
+              <span className="text-xs sm:text-sm text-slate-600">
                 Data Privacy & Confidentiality Policy အရ Public ပုံများကို Directory တွင် ပြသရန်နှင့် Private ပုံများကို VIP Client စိစစ်မှုတွင် အသုံးပြုရန် သဘောတူပါသည်။
               </span>
             </label>
           </section>
 
-          {/* Inline Validation Banner (Replaces window.alert) */}
+          {/* Inline Validation Banner */}
           {validationError && (
             <div
               role="alert"
@@ -667,7 +684,7 @@ export default function Register() {
           <button
             type="submit"
             disabled={isSubmitting}
-            className="w-full bg-[#0C0D0E] hover:bg-[#C5A059] text-[#FAF8F5] hover:text-[#0C0D0E] font-semibold py-4 px-6 rounded-xl transition-colors text-sm sm:text-base tracking-wide disabled:opacity-50"
+            className="w-full welink-brand-gradient hover:opacity-95 text-slate-950 font-bold py-4 px-6 rounded-xl shadow-md transition-opacity text-sm sm:text-base tracking-wide disabled:opacity-50"
           >
             {isSubmitting
               ? 'Encrypting & Submitting Dossier...'

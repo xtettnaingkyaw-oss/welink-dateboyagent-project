@@ -6,8 +6,8 @@
   html {
     scroll-behavior: smooth;
     font-family: 'Plus Jakarta Sans', 'Padauk', system-ui, sans-serif;
-    background-color: #FAF8F5;
-    color: #111315;
+    background-color: #F8FAFC;
+    color: #0F172A;
   }
 
   h1, h2, h3, .font-serif, .font-editorial {
@@ -19,6 +19,29 @@
 
 .tabular-nums {
   font-variant-numeric: lining-nums tabular-nums;
+}
+
+/* WE LINK Signature Brand Spectrum ("ALL OF YOU" Rainbow Arch + Gold/Emerald Duo) */
+.welink-spectrum-bar {
+  background: linear-gradient(
+    90deg,
+    #FBBF24 0%,
+    #22C55E 22%,
+    #EF4444 44%,
+    #2563EB 64%,
+    #7C3AED 82%,
+    #F97316 100%
+  );
+}
+
+.welink-brand-gradient {
+  background: linear-gradient(135deg, #F59E0B 0%, #EAB308 45%, #10B981 100%);
+}
+
+.welink-text-gradient {
+  background: linear-gradient(90deg, #FBBF24 0%, #34D399 55%, #60A5FA 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }
 
 .hide-scrollbar::-webkit-scrollbar {

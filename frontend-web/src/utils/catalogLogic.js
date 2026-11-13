@@ -1,3 +1,7 @@
+export const BRAND_LOGO_URL =
+  '/assets/aistudio/IMG-261ce20021d63ca3c8be56a8803e3540-V_86eb9421.jpg';
+export const BRAND_TAGLINE = 'ALL OF YOU';
+
 export const HERO_LOUNGE_IMAGE = '/assets/images/hero_luxury_lounge_1794591265943.jpg';
 
 export const FALLBACK_PORTRAITS = [

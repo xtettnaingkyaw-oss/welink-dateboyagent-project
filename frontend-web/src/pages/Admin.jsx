@@ -765,80 +765,85 @@ export default function Admin() {
 
   if (!loggedInAdmin) {
     return (
-      <div className="min-h-screen bg-[#0C0D0E] flex items-center justify-center p-4">
-        <div className="bg-[#141619] p-8 sm:p-10 rounded-2xl w-full max-w-md border border-[#262420]">
-          <div className="flex flex-col items-center mb-8 text-center">
-            <div className="w-14 h-14 bg-[#0C0D0E] border border-[#C5A059] rounded-xl flex items-center justify-center mb-4 text-[#C5A059]">
-              <Lock size={24} />
-            </div>
-            <p className="font-mono text-xs tracking-[0.2em] text-[#C5A059] font-semibold">
-              WE LINK EXECUTIVE CONSOLE
-            </p>
-            <h1 className="font-serif text-3xl font-medium text-[#FAF8F5] mt-1">
-              Admin Portal Sign In
-            </h1>
-          </div>
-
-          <form onSubmit={handleLogin} className="space-y-4">
-            <div>
-              <label
-                htmlFor="admin-username"
-                className="text-xs font-semibold text-[#B8B2A6] mb-1.5 block"
-              >
-                Executive Username
-              </label>
-              <input
-                id="admin-username"
-                type="text"
-                value={loginUser}
-                onChange={(e) => setLoginUser(e.target.value)}
-                className="w-full px-4 py-3 bg-[#0C0D0E] border border-[#33302A] rounded-lg text-sm text-[#FAF8F5] outline-none focus:border-[#C5A059] transition-colors"
-                placeholder="Username..."
-                required
+      <div className="min-h-screen bg-gradient-to-br from-[#0B1120] via-[#0F172A] to-[#062E22] flex items-center justify-center p-4">
+        <div className="bg-slate-900/95 backdrop-blur-xl rounded-2xl w-full max-w-md border border-slate-800 overflow-hidden shadow-2xl">
+          <div className="h-1.5 w-full welink-spectrum-bar" />
+          <div className="p-8 sm:p-10">
+            <div className="flex flex-col items-center mb-8 text-center">
+              <img
+                src="/assets/aistudio/IMG-261ce20021d63ca3c8be56a8803e3540-V_86eb9421.jpg"
+                alt="WE LINK Logo"
+                className="w-20 h-20 object-contain rounded-2xl bg-white p-1.5 mb-4 shadow-lg"
               />
-            </div>
-            <div>
-              <label
-                htmlFor="admin-password"
-                className="text-xs font-semibold text-[#B8B2A6] mb-1.5 block"
-              >
-                Security Passkey
-              </label>
-              <input
-                id="admin-password"
-                type="password"
-                value={loginPass}
-                onChange={(e) => setLoginPass(e.target.value)}
-                className="w-full px-4 py-3 bg-[#0C0D0E] border border-[#33302A] rounded-lg text-sm text-[#FAF8F5] outline-none focus:border-[#C5A059] transition-colors"
-                placeholder="Password..."
-                required
-              />
-            </div>
-            {loginError && (
-              <p
-                role="alert"
-                className="text-rose-400 text-xs font-medium text-center bg-rose-950/50 p-3 rounded-lg border border-rose-800/60"
-              >
-                {loginError}
+              <p className="font-mono text-xs tracking-[0.2em] text-amber-400 font-semibold">
+                WE LINK · ALL OF YOU
               </p>
-            )}
-            <button
-              type="submit"
-              disabled={isLoggingIn}
-              className="w-full bg-[#C5A059] hover:bg-[#b58f47] text-[#0C0D0E] py-3.5 rounded-lg font-semibold text-xs sm:text-sm tracking-wide transition-colors flex items-center justify-center gap-2 mt-2"
-            >
-              {isLoggingIn ? 'Verifying Credentials...' : 'Sign In to Executive Console'}
-            </button>
-          </form>
+              <h1 className="font-serif text-3xl font-medium text-white mt-1">
+                Admin Portal Sign In
+              </h1>
+            </div>
 
-          <div className="mt-6 pt-6 border-t border-[#262420] text-center">
-            <Link
-              to="/"
-              className="inline-flex items-center gap-1.5 text-xs text-[#8C857B] hover:text-[#FAF8F5] transition-colors"
-            >
-              <ArrowLeft size={13} />
-              <span>Return to Public Companion Directory</span>
-            </Link>
+            <form onSubmit={handleLogin} className="space-y-4">
+              <div>
+                <label
+                  htmlFor="admin-username"
+                  className="text-xs font-semibold text-slate-300 mb-1.5 block"
+                >
+                  Executive Username
+                </label>
+                <input
+                  id="admin-username"
+                  type="text"
+                  value={loginUser}
+                  onChange={(e) => setLoginUser(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white outline-none focus:border-amber-400 transition-colors"
+                  placeholder="Username..."
+                  required
+                />
+              </div>
+              <div>
+                <label
+                  htmlFor="admin-password"
+                  className="text-xs font-semibold text-slate-300 mb-1.5 block"
+                >
+                  Security Passkey
+                </label>
+                <input
+                  id="admin-password"
+                  type="password"
+                  value={loginPass}
+                  onChange={(e) => setLoginPass(e.target.value)}
+                  className="w-full px-4 py-3 bg-slate-950 border border-slate-800 rounded-xl text-sm text-white outline-none focus:border-amber-400 transition-colors"
+                  placeholder="Password..."
+                  required
+                />
+              </div>
+              {loginError && (
+                <p
+                  role="alert"
+                  className="text-rose-400 text-xs font-medium text-center bg-rose-950/50 p-3 rounded-xl border border-rose-800/60"
+                >
+                  {loginError}
+                </p>
+              )}
+              <button
+                type="submit"
+                disabled={isLoggingIn}
+                className="w-full welink-brand-gradient hover:opacity-95 text-slate-950 py-3.5 rounded-xl font-bold text-xs sm:text-sm tracking-wide transition-opacity flex items-center justify-center gap-2 mt-2 shadow-md"
+              >
+                {isLoggingIn ? 'Verifying Credentials...' : 'Sign In to Executive Console'}
+              </button>
+            </form>
+
+            <div className="mt-6 pt-6 border-t border-slate-800 text-center">
+              <Link
+                to="/"
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-white transition-colors"
+              >
+                <ArrowLeft size={13} />
+                <span>Return to Public Companion Directory</span>
+              </Link>
+            </div>
           </div>
         </div>
       </div>
@@ -853,16 +858,16 @@ export default function Admin() {
         onClick={() => setActiveTab(tab)}
         className={`flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg font-semibold text-xs sm:text-sm transition-colors whitespace-nowrap shrink-0 ${
           isActive
-            ? 'bg-[#0C0D0E] text-[#FAF8F5]'
-            : 'text-[#5C564E] hover:text-[#0C0D0E] hover:bg-white'
+            ? 'bg-slate-900 text-white'
+            : 'text-slate-600 hover:text-slate-900 hover:bg-white'
         }`}
       >
-        <Icon size={15} className={isActive ? 'text-[#C5A059]' : 'text-[#787167]'} />
+        <Icon size={15} className={isActive ? 'text-amber-400' : 'text-slate-500'} />
         <span>{label}</span>
         {count > 0 && (
           <span
             className={`ml-1 px-2 py-0.5 rounded font-mono text-[11px] font-semibold tabular-nums ${
-              isActive ? 'bg-[#C5A059] text-[#0C0D0E]' : 'bg-[#E6DFD3] text-[#0C0D0E]'
+              isActive ? 'bg-amber-400 text-slate-950' : 'bg-slate-200 text-slate-900'
             }`}
           >
             {count}
@@ -873,19 +878,22 @@ export default function Admin() {
   };
 
   return (
-    <div className="min-h-screen bg-[#FAF8F5] pb-20">
+    <div className="min-h-screen bg-[#F8FAFC] pb-20">
+      <div className="h-1.5 w-full welink-spectrum-bar" />
       {/* Executive Sub-Header */}
-      <div className="bg-white border-b border-[#E6DFD3]">
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 py-5 flex flex-wrap items-center justify-between gap-4">
+      <div className="bg-white border-b border-slate-200">
+        <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 py-4 flex flex-wrap items-center justify-between gap-4">
           <div className="flex items-center gap-3.5">
-            <div className="w-11 h-11 bg-[#0C0D0E] rounded-xl flex items-center justify-center text-[#C5A059]">
-              <Shield size={20} />
-            </div>
+            <img
+              src="/assets/aistudio/IMG-261ce20021d63ca3c8be56a8803e3540-V_86eb9421.jpg"
+              alt="WE LINK Logo"
+              className="w-12 h-12 object-contain rounded-xl bg-white border border-slate-200 p-0.5 shadow-sm"
+            />
             <div>
-              <h1 className="font-serif text-2xl font-semibold text-[#0C0D0E]">
-                Executive Concierge & Roster Governance
+              <h1 className="font-serif text-2xl font-semibold text-slate-900">
+                WE LINK Executive Concierge Console
               </h1>
-              <p className="font-mono text-xs text-[#6E675F] tabular-nums">
+              <p className="font-mono text-xs text-slate-500 tabular-nums">
                 Operator: {loggedInAdmin.username} · Role:{' '}
                 {loggedInAdmin.role === 'super_admin' ? 'Super Admin' : 'Sub Admin'}
               </p>
