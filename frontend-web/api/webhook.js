@@ -805,6 +805,11 @@ export default async function handler(req, res) {
           ? boyData.telegramProfileLink.match(/id=(\d+)/)?.[1]
           : null);
 
+      const tgProfileLink =
+        reqBody.telegramProfileLink ||
+        boyData.telegramProfileLink ||
+        (targetChatId ? `tg://user?id=${targetChatId}` : "");
+
       let userNotified = false;
       if (targetChatId) {
         const boyStateRef = doc(db, "telegram_states", String(targetChatId));
@@ -830,33 +835,59 @@ export default async function handler(req, res) {
         });
       }
 
-      // Also notify the Admin's Telegram Bot chat so the Admin sees an instant confirmation notification in Telegram
+      // Also notify the Admin's Telegram Bot chat with the Date Boy's direct Telegram Chat Profile Link
       const adminChatId = await getAdminChatId();
       let adminNotified = false;
       if (adminChatId) {
         const statusLine = userNotified
           ? `✅ <b>${escapeHTML(boyName)}</b> ၏ Telegram Chat သို့ ပုံနှင့် Video အသစ်ပြန်ပို့ပေးရန် အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ။\n(Date Boy မှ ပုံအသစ်ပြန်ပို့သည်နှင့် ဤ Bot သို့ အလိုအလျောက် ရောက်ရှိလာပါမည်)`
-          : `⚠️ Date Boy ထံသို့ တိုက်ရိုက်စာပို့ရာတွင် အခက်အခဲရှိပါသည် (Bot အား ပိတ်ထားခြင်း သို့မဟုတ် Chat ID မရှိခြင်း ဖြစ်နိုင်ပါသည်)။ အောက်ပါခလုတ်ကိုနှိပ်၍ Admin ကိုယ်တိုင် ပုံ/Video အသစ် လဲလှယ်နိုင်ပါသည်။`;
+          : `⚠️ Date Boy ထံသို့ တိုက်ရိုက်စာပို့ရာတွင် အခက်အခဲရှိပါသည် (Bot အား ပိတ်ထားခြင်း သို့မဟုတ် Chat ID မရှိခြင်း ဖြစ်နိုင်ပါသည်)။ အောက်ပါ Link သို့မဟုတ် ခလုတ်မှတစ်ဆင့် ဆက်သွယ်/လဲလှယ်နိုင်ပါသည်။`;
+
+        const tgLinkLine = tgProfileLink
+          ? `🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgProfileLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန် (ဒီကိုနှိပ်ပါ)</a>\n\n`
+          : "";
 
         const adminNotiText =
           `🔔 <b>ပုံနှင့် Video အသစ်ပြန်တောင်းဆိုမှု အသိပေးချက် (Web Admin)</b>\n\n` +
           `🆔 <b>Code:</b> ${boyCode}\n` +
           `👤 <b>အမည်:</b> ${escapeHTML(boyName)}\n` +
           `📞 <b>ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
-          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
+          tgLinkLine +
           statusLine;
 
-        const adminKeyboard = {
-          inline_keyboard: [
-            [
-              {
-                text: "🔄 Admin ကိုယ်တိုင် ပုံ/Video အသစ်လဲမည်",
-                callback_data: `ADM_MEDIA_${targetBoyId}`,
-              },
+        const inlineRows = [];
+        if (tgProfileLink) {
+          inlineRows.push([
+            {
+              text: `💬 ${boyName} နှင့် တိုက်ရိုက်စကားပြောရန်`,
+              url: tgProfileLink,
+            },
+          ]);
+        }
+        inlineRows.push([
+          {
+            text: "🔄 Admin ကိုယ်တိုင် ပုံ/Video အသစ်လဲမည်",
+            callback_data: `ADM_MEDIA_${targetBoyId}`,
+          },
+        ]);
+
+        let admRes = await sendMessage(adminChatId, adminNotiText, {
+          inline_keyboard: inlineRows,
+        });
+        // Fallback without URL button if Telegram privacy settings reject tg://user?id= in inline button
+        if (!admRes?.ok && tgProfileLink) {
+          admRes = await sendMessage(adminChatId, adminNotiText, {
+            inline_keyboard: [
+              [
+                {
+                  text: "🔄 Admin ကိုယ်တိုင် ပုံ/Video အသစ်လဲမည်",
+                  callback_data: `ADM_MEDIA_${targetBoyId}`,
+                },
+              ],
             ],
-          ],
-        };
-        const admRes = await sendMessage(adminChatId, adminNotiText, adminKeyboard);
+          });
+        }
         adminNotified = Boolean(admRes?.ok);
       }
 
@@ -1103,13 +1134,14 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
+        const tgLink = boy.telegramProfileLink || `tg://user?id=${boy.telegramChatId}`;
         await sendMessage(
           boy.telegramChatId,
           `📢 <b>WE LINK Admin အသိပေးချက်</b>\n\nသင်၏ Date Boy လျှောက်လွှာ (<b>${boyCode}</b>) မှ ဓာတ်ပုံနှင့် Video များကို စနစ်အသစ်သို့ ပြောင်းလဲသိမ်းဆည်းရန် လိုအပ်ပါသဖြင့် ကျေးဇူးပြု၍ <b>မျက်နှာသေချာမြင်ရသည့် အလှဓာတ်ပုံ (၃) ပုံ</b> ကို ယခု Chat တွင် တစ်ပုံချင်း ပြန်လည်ပေးပို့ပေးပါ ခင်ဗျာ။\n\n(ကိုယ်ရေးအချက်အလက်များ ထပ်မံဖြည့်သွင်းရန် မလိုအပ်ပါ — ပထမဆုံး အလှဓာတ်ပုံ ၁ ပုံကို စတင်ပို့ပေးပါ):`
         );
         await sendMessage(
           chatId,
-          `📩 <b>${escapeHTML(boy.name)} (${boyCode})</b> ထံသို့ ဓာတ်ပုံနှင့် Video အသစ်ပြန်လည်ပေးပို့ပေးရန် အကြောင်းကြားစာ ပို့ပေးလိုက်ပါပြီ။`
+          `📩 <b>${escapeHTML(boy.name)} (${boyCode})</b> ထံသို့ ဓာတ်ပုံနှင့် Video အသစ်ပြန်လည်ပေးပို့ပေးရန် အကြောင်းကြားစာ ပို့ပေးလိုက်ပါပြီ။\n\n🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgLink}">💬 ${escapeHTML(boy.name)} နှင့် တိုက်ရိုက်စကားပြောရန် (ဒီကိုနှိပ်ပါ)</a>`
         );
         return res.status(200).json({ status: "ok" });
       }
@@ -1686,9 +1718,11 @@ export default async function handler(req, res) {
         if (boySnap.exists()) {
           const updatedBoy = boySnap.data();
           const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+          const tgLink =
+            updatedBoy.telegramProfileLink || `tg://user?id=${updatedBoy.telegramChatId || chatId}`;
           await sendMessage(
             adminChatId,
-            `✅ <b>${escapeHTML(updatedBoy.name)} (${boyCode})</b> မှ ဓာတ်ပုံနှင့် Video များကို အသစ်ပြန်လည်ပေးပို့ပြီးပါပြီ!`
+            `✅ <b>${escapeHTML(updatedBoy.name)} (${boyCode})</b> မှ ဓာတ်ပုံနှင့် Video များကို အသစ်ပြန်လည်ပေးပို့ပြီးပါပြီ!\n\n🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgLink}">💬 ${escapeHTML(updatedBoy.name)} နှင့် တိုက်ရိုက်စကားပြောရန် (ဒီကိုနှိပ်ပါ)</a>`
           );
           await sendCompanionMediaToChat(adminChatId, updatedBoy, targetBoyId, {
             includePublic: true,

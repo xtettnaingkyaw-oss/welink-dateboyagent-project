@@ -897,6 +897,7 @@ export default function Admin() {
           internal_action: 'request_media_reupload',
           boyId: boy.id,
           chatId: resolvedChatId,
+          telegramProfileLink: boy.telegramProfileLink || '',
           boyName: boy.name,
           boyPhone: boy.phone,
           boyCity: boy.city,
