@@ -1,11 +1,10 @@
 import React, { useEffect } from 'react';
 import { BrowserRouter as Router, Routes, Route, Link, useLocation } from 'react-router-dom';
-import { UserPlus, Search, HeartHandshake, ShieldCheck, Lock, Sparkles, Clock } from 'lucide-react';
+import { ShieldCheck, Lock, Clock, ArrowUpRight } from 'lucide-react';
 import Home from './pages/Home';
 import Register from './pages/Register';
 import Admin from './pages/Admin';
 
-// စာမျက်နှာပြောင်းတိုင်း အပေါ်ဆုံးသို့ အလိုအလျောက် ပြန်တက်ပေးမည့် Component
 function ScrollToTop() {
   const { pathname } = useLocation();
   useEffect(() => {
@@ -16,67 +15,77 @@ function ScrollToTop() {
 
 function Navigation() {
   const location = useLocation();
-  const isActive = (path) => location.pathname === path;
+  if (location.pathname.startsWith('/admin')) return null;
+  const isRegisterPage = location.pathname === '/register';
 
-  // Client များနှင့် အများပြည်သူမြင်ရမည့် Navigation (Admin ခလုတ် လုံးဝမပါပါ)
+  // Strict 3-Zone Top Bar Contract:
+  // Zone 1: Single text element wordmark
+  // Zone 2: 4 concise single-line navigation links
+  // Zone 3: 1 primary action button
   return (
-    <header className="sticky top-0 z-50 bg-white/85 backdrop-blur-2xl border-b border-slate-200/70 shadow-[0_2px_20px_-4px_rgba(15,23,42,0.05)] transition-all duration-300">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        <div className="flex justify-between items-center h-16 md:h-20">
-          
-          {/* Brand Logo & International Agency Tagline */}
-          <Link to="/" className="flex items-center gap-3 group focus:outline-none">
-            <div className="relative p-2.5 bg-gradient-to-tr from-amber-500 via-yellow-400 to-emerald-500 rounded-2xl group-hover:scale-105 group-hover:rotate-3 transition-all duration-300 shadow-md shadow-amber-500/20">
-              <HeartHandshake className="text-white w-6 h-6 md:w-7 md:h-7 drop-shadow-sm" />
-              <span className="absolute -top-1 -right-1 flex h-3 w-3">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 border-2 border-white"></span>
-              </span>
-            </div>
+    <header className="sticky top-0 z-50 bg-[#FAF8F5]/95 backdrop-blur-md border-b border-[#E6DFD3] transition-colors duration-200">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between gap-8">
+        {/* Zone 1: Brand Wordmark (single text element, no badges or subtitles) */}
+        <Link
+          to="/"
+          className="font-serif text-2xl sm:text-[28px] font-semibold tracking-[0.18em] text-[#0C0D0E] whitespace-nowrap shrink-0 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#C5A059]"
+        >
+          WE LINK
+        </Link>
 
-            <div className="flex flex-col">
-              <div className="flex items-center gap-1.5">
-                <span className="text-xl sm:text-2xl md:text-3xl font-black bg-gradient-to-r from-amber-500 via-yellow-500 to-emerald-600 text-transparent bg-clip-text tracking-tight leading-none">
-                  WE LINK
-                </span>
-                <span className="hidden sm:inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200/80">
-                  <ShieldCheck size={11} className="text-emerald-600" />
-                  Verified
-                </span>
-              </div>
-              <span className="text-[10px] sm:text-xs font-semibold text-slate-400 tracking-widest uppercase mt-0.5">
-                Premier Companion Agency
-              </span>
-            </div>
+        {/* Zone 2: Concise single-line navigation links */}
+        <nav aria-label="Primary Navigation" className="hidden md:flex items-center gap-8 text-sm font-medium text-[#524E48]">
+          <Link
+            to="/"
+            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b ${
+              location.pathname === '/'
+                ? 'text-[#0C0D0E] border-[#0C0D0E] font-semibold'
+                : 'border-transparent hover:text-[#0C0D0E] hover:border-[#C5A059]'
+            }`}
+          >
+            Directory
           </Link>
+          <a
+            href="/#concierge-protocol"
+            className="py-1 border-b border-transparent hover:text-[#0C0D0E] hover:border-[#C5A059] transition-colors whitespace-nowrap shrink-0"
+          >
+            Concierge Protocol
+          </a>
+          <a
+            href="/#discretion-pillars"
+            className="py-1 border-b border-transparent hover:text-[#0C0D0E] hover:border-[#C5A059] transition-colors whitespace-nowrap shrink-0"
+          >
+            Discretion & Trust
+          </a>
+          <Link
+            to="/register"
+            className={`py-1 transition-colors whitespace-nowrap shrink-0 border-b ${
+              isRegisterPage
+                ? 'text-[#0C0D0E] border-[#0C0D0E] font-semibold'
+                : 'border-transparent hover:text-[#0C0D0E] hover:border-[#C5A059]'
+            }`}
+          >
+            Model Application
+          </Link>
+        </nav>
 
-          {/* Client & Register Buttons Only (Pill Switcher Style) */}
-          <div className="flex items-center gap-1.5 sm:gap-2.5 bg-slate-100/90 p-1.5 rounded-2xl border border-slate-200/70">
+        {/* Zone 3: Single Primary Action */}
+        <div className="flex items-center shrink-0">
+          {isRegisterPage ? (
             <Link
               to="/"
-              className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all duration-300 font-bold text-xs sm:text-sm ${
-                isActive('/')
-                  ? 'bg-slate-900 text-white shadow-md shadow-slate-900/20 scale-[1.02]'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
-              }`}
+              className="px-5 py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-[#FAF8F5] bg-[#0C0D0E] hover:bg-[#1E2126] rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
-              <Search size={16} className={isActive('/') ? 'text-amber-400' : 'text-slate-500'} />
-              <span>Find Date Boy</span>
+              Browse Directory
             </Link>
-
+          ) : (
             <Link
               to="/register"
-              className={`flex items-center gap-2 px-3.5 sm:px-5 py-2 sm:py-2.5 rounded-xl transition-all duration-300 font-bold text-xs sm:text-sm ${
-                isActive('/register')
-                  ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/25 scale-[1.02]'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-white/70'
-              }`}
+              className="px-5 py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-[#0C0D0E] bg-[#C5A059] hover:bg-[#b58f47] rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
-              <UserPlus size={16} className={isActive('/register') ? 'text-white' : 'text-emerald-600'} />
-              <span>Join as Date Boy</span>
+              Apply as Companion
             </Link>
-          </div>
-
+          )}
         </div>
       </div>
     </header>
@@ -85,66 +94,81 @@ function Navigation() {
 
 function Footer() {
   const location = useLocation();
-  // Admin စာမျက်နှာတွင် အလုပ်လုပ်ရလွယ်ကူစေရန် Footer ကို ဖျောက်ထားပါသည်
   if (location.pathname.startsWith('/admin')) return null;
 
   return (
-    <footer className="bg-white border-t border-slate-200/80 mt-20">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10 md:py-12">
-        {/* Trust & Discretion Pillars */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pb-8 border-b border-slate-100">
-          <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-slate-50/80 border border-slate-100">
-            <div className="p-2.5 rounded-xl bg-emerald-100/80 text-emerald-700 shrink-0">
-              <ShieldCheck size={20} />
+    <footer id="discretion-pillars" className="bg-[#0C0D0E] text-[#FAF8F5] border-t border-[#262420] mt-24">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 py-16 sm:py-20">
+        {/* Editorial Discretion & Governance Pillars */}
+        <div className="mb-12">
+          <p className="text-xs tracking-[0.2em] text-[#C5A059] font-medium mb-3">
+            PRIVATE GOVERNANCE & STANDARDS
+          </p>
+          <h2 className="font-serif text-2xl sm:text-4xl font-medium text-[#FAF8F5] max-w-2xl">
+            Engineered for absolute discretion, personal safety, and verified authenticity.
+          </h2>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-8 pb-16 border-b border-[#262420]">
+          <div className="p-6 sm:p-8 rounded-xl bg-[#141619] border border-[#262420]">
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-mono text-xs text-[#C5A059] tabular-nums">01. VERIFICATION</span>
+              <ShieldCheck size={18} className="text-[#C5A059]" />
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900">100% Verified Companions</h4>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Every profile is personally screened and verified by WE LINK management for authenticity and quality.
-              </p>
-            </div>
+            <h3 className="font-serif text-xl font-medium text-[#FAF8F5] mb-2">
+              01. 100% Screened Portfolios
+            </h3>
+            <p className="text-xs sm:text-sm text-[#A39E93] leading-relaxed">
+              Every companion portfolio undergoes strict identity, appearance, and background verification by WE LINK executive management prior to directory listing.
+            </p>
           </div>
 
-          <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-slate-50/80 border border-slate-100">
-            <div className="p-2.5 rounded-xl bg-amber-100/80 text-amber-700 shrink-0">
-              <Lock size={20} />
+          <div className="p-6 sm:p-8 rounded-xl bg-[#141619] border border-[#262420]">
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-mono text-xs text-[#C5A059] tabular-nums">02. CONFIDENTIALITY</span>
+              <Lock size={18} className="text-[#C5A059]" />
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900">Strict Privacy & Discretion</h4>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Client and companion identities, booking details, and private requests are handled with absolute confidentiality.
-              </p>
-            </div>
+            <h3 className="font-serif text-xl font-medium text-[#FAF8F5] mb-2">
+              02. Strict Non-Disclosure Protocol
+            </h3>
+            <p className="text-xs sm:text-sm text-[#A39E93] leading-relaxed">
+              Client identities, private contact handles, and arrangement itineraries are encrypted and handled exclusively through our private concierge desk.
+            </p>
           </div>
 
-          <div className="flex items-start gap-3.5 p-4 rounded-2xl bg-slate-50/80 border border-slate-100">
-            <div className="p-2.5 rounded-xl bg-blue-100/80 text-blue-700 shrink-0">
-              <Clock size={20} />
+          <div className="p-6 sm:p-8 rounded-xl bg-[#141619] border border-[#262420]">
+            <div className="flex items-center justify-between mb-4">
+              <span className="font-mono text-xs text-[#C5A059] tabular-nums">03. DISPATCH</span>
+              <Clock size={18} className="text-[#C5A059]" />
             </div>
-            <div>
-              <h4 className="text-sm font-bold text-slate-900">Fast Concierge Booking</h4>
-              <p className="text-xs text-slate-500 mt-1 leading-relaxed">
-                Seamless real-time booking confirmation and dedicated Telegram concierge assistance.
-              </p>
-            </div>
+            <h3 className="font-serif text-xl font-medium text-[#FAF8F5] mb-2">
+              03. Bespoke Concierge Coordination
+            </h3>
+            <p className="text-xs sm:text-sm text-[#A39E93] leading-relaxed">
+              Seamless reservation scheduling via Web Dossier or automated Telegram Concierge with dedicated support across Yangon, Mandalay, and major cities.
+            </p>
           </div>
         </div>
 
-        {/* Bottom Copyright & Quick Links */}
-        <div className="pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-slate-400">
-          <div className="flex items-center gap-2">
-            <Sparkles size={14} className="text-amber-500" />
-            <span className="font-semibold text-slate-600">WE LINK AGENCY</span>
-            <span>— Exclusive Date Boy & Companion Platform</span>
+        {/* Quiet Bottom Bar */}
+        <div className="pt-8 flex flex-col sm:flex-row items-center justify-between gap-6 text-xs text-[#8C857B]">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="font-serif text-base tracking-[0.18em] text-[#FAF8F5] font-semibold">
+              WE LINK
+            </span>
+            <span aria-hidden="true">·</span>
+            <span>Premier Male Companion & Private Concierge Agency</span>
           </div>
-          <div className="flex items-center gap-6">
-            <Link to="/" className="hover:text-slate-700 font-medium transition-colors">
-              Browse Catalog
+
+          <div className="flex flex-wrap items-center gap-6">
+            <Link to="/" className="hover:text-[#FAF8F5] transition-colors whitespace-nowrap">
+              Companion Directory
             </Link>
-            <Link to="/register" className="hover:text-slate-700 font-medium transition-colors">
-              Become a Model
+            <Link to="/register" className="hover:text-[#FAF8F5] transition-colors inline-flex items-center gap-1 whitespace-nowrap">
+              <span>Model Dossier Application</span>
+              <ArrowUpRight size={13} />
             </Link>
-            <span>© {new Date().getFullYear()} All Rights Reserved.</span>
+            <span className="tabular-nums">© {new Date().getFullYear()} WE LINK. All Rights Reserved.</span>
           </div>
         </div>
       </div>
@@ -156,13 +180,12 @@ export default function App() {
   return (
     <Router>
       <ScrollToTop />
-      <div className="min-h-screen flex flex-col bg-[#f8fafc] text-slate-900 font-sans selection:bg-amber-500 selection:text-white">
+      <div className="min-h-screen flex flex-col bg-[#FAF8F5] text-[#111315] font-sans">
         <Navigation />
-        <main className="flex-grow transition-all duration-300">
+        <main className="flex-grow">
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/register" element={<Register />} />
-            {/* Login အဟောင်းကြီးကို ဖယ်ထုတ်ပြီး၊ Admin.jsx ကို တိုက်ရိုက်ချိတ်ဆက်လိုက်ပါသည် */}
             <Route path="/admin" element={<Admin />} />
           </Routes>
         </main>

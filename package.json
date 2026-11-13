@@ -6,6 +6,7 @@
   ],
   "scripts": {
     "dev": "cd frontend-web && bun run dev --host 0.0.0.0",
-    "build": "cd frontend-web && bun run build"
+    "build": "cd frontend-web && bun run build",
+    "lint": "cd frontend-web && bun run build"
   }
 }
