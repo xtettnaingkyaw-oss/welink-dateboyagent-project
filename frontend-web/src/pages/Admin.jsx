@@ -44,6 +44,7 @@ import {
   ArrowLeft,
   UploadCloud,
   Send,
+  Loader2,
 } from 'lucide-react';
 import {
   FALLBACK_PORTRAITS,
@@ -67,6 +68,7 @@ const DateBoyCard = ({
   handleAdminPhotoUpload,
   isUploadingEditPhoto,
   requestTelegramMediaReupload,
+  reuploadStatus,
 }) => {
   const [brokenImgDetected, setBrokenImgDetected] = useState(false);
 
@@ -251,19 +253,49 @@ const DateBoyCard = ({
             </div>
 
             {hasLegacyLinks && (
-              <div className="mb-4 p-3 rounded-lg bg-amber-50 border border-amber-200 text-[11px] text-amber-900 space-y-2">
+              <div className="mb-4 p-3.5 rounded-xl bg-amber-50/95 border border-amber-200/90 text-[11px] text-amber-950 space-y-2.5 shadow-sm">
                 <p className="font-semibold leading-relaxed">
                   ⚠️ ယခင် Telegram (၁) နာရီသက်တမ်းကုန် Link အဟောင်း ဖြစ်နေပါသည်။ Edit နှိပ်၍ ပုံအသစ်တင်ပါ သို့မဟုတ် Date Boy ထံ ပုံပြန်တောင်းပါ။
                 </p>
-                {boy.telegramChatId && (
-                  <button
-                    type="button"
-                    onClick={() => requestTelegramMediaReupload(boy)}
-                    className="w-full py-1.5 px-2.5 bg-amber-900 text-white rounded font-semibold flex items-center justify-center gap-1.5 hover:bg-amber-950 transition-colors"
-                  >
-                    <Send size={12} />
-                    <span>Telegram မှ ပုံအသစ်ပြန်တောင်းမည်</span>
-                  </button>
+                <button
+                  type="button"
+                  disabled={reuploadStatus === 'sending'}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    requestTelegramMediaReupload(boy);
+                  }}
+                  className={`w-full py-2.5 px-3 rounded-lg font-bold text-xs flex items-center justify-center gap-2 transition-all duration-200 select-none ${
+                    reuploadStatus === 'sending'
+                      ? 'bg-slate-900 text-amber-300 border border-amber-400/50 cursor-wait scale-[0.98] shadow-inner'
+                      : reuploadStatus === 'sent'
+                        ? 'bg-emerald-700 hover:bg-emerald-800 active:scale-95 text-white border border-emerald-500 shadow-md cursor-pointer'
+                        : 'bg-gradient-to-r from-[#78350F] via-[#92400E] to-[#78350F] hover:from-[#92400E] hover:to-[#B45309] hover:-translate-y-0.5 hover:shadow-md active:translate-y-0 active:scale-95 text-white shadow-sm cursor-pointer'
+                  }`}
+                >
+                  {reuploadStatus === 'sending' ? (
+                    <>
+                      <Loader2 size={14} className="animate-spin text-amber-400 shrink-0" />
+                      <span>Telegram Bot သို့ ပေးပို့နေပါသည်...</span>
+                    </>
+                  ) : reuploadStatus === 'sent' ? (
+                    <>
+                      <CheckCircle2 size={14} className="text-emerald-200 shrink-0" />
+                      <span>ပို့ပြီးပါပြီ · ထပ်မံပို့ရန် နှိပ်ပါ</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send size={13} className="shrink-0" />
+                      <span>Telegram မှ ပုံအသစ်ပြန်တောင်းမည်</span>
+                    </>
+                  )}
+                </button>
+                {reuploadStatus === 'sent' && (
+                  <div className="p-2 rounded-lg bg-emerald-50 border border-emerald-200 text-emerald-900 text-[11px] font-medium leading-relaxed flex items-start gap-1.5">
+                    <CheckCircle2 size={13} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <span>
+                      Date Boy ထံသို့ ပုံပြန်တောင်းစာ ပို့ပြီးပါပြီ — Admin ၏ Telegram Bot တွင်လည်း Notification ပို့ထားပါသည်။
+                    </span>
+                  </div>
                 )}
               </div>
             )}
@@ -503,6 +535,7 @@ export default function Admin() {
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
   const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState('');
+  const [reuploadStatusByBoyId, setReuploadStatusByBoyId] = useState({});
 
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '',
@@ -835,24 +868,59 @@ export default function Admin() {
   };
 
   const requestTelegramMediaReupload = async (boy) => {
-    if (!boy || !boy.telegramChatId) return;
+    if (!boy) return;
+    const boyCode = `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`;
+    const resolvedChatId =
+      boy.telegramChatId ||
+      (typeof boy.telegramProfileLink === 'string'
+        ? boy.telegramProfileLink.match(/id=(\d+)/)?.[1]
+        : null);
+
+    setReuploadStatusByBoyId((prev) => ({ ...prev, [boy.id]: 'sending' }));
+
     try {
-      await fetch('/api/webhook', {
+      if (resolvedChatId) {
+        await setDoc(
+          doc(db, 'telegram_states', String(resolvedChatId)),
+          {
+            step: 'REUPLOAD_PUBLIC_PHOTOS',
+            data: { targetBoyId: boy.id, publicPhotos: [], publicFileIds: [] },
+          },
+          { merge: true }
+        );
+      }
+
+      const res = await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           internal_action: 'request_media_reupload',
           boyId: boy.id,
-          chatId: boy.telegramChatId,
+          chatId: resolvedChatId,
+          boyName: boy.name,
+          boyPhone: boy.phone,
+          boyCity: boy.city,
+          boyTownship: boy.township,
         }),
       });
+      const data = await res.json().catch(() => ({}));
+
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Webhook request failed');
+      }
+
+      setReuploadStatusByBoyId((prev) => ({ ...prev, [boy.id]: 'sent' }));
       showToast(
-        `${boy.name} ထံသို့ Telegram မှတစ်ဆင့် ဓာတ်ပုံနှင့် Video အသစ်ပြန်လည်ပေးပို့ရန် အကြောင်းကြားစာ ပို့လိုက်ပါပြီ။`,
+        `✅ ${boy.name} (${boyCode}) ထံသို့ ပုံအသစ်ပြန်တောင်းစာ ပို့ပြီးပါပြီ! Telegram Bot တွင်လည်း အသိပေးချက် ပို့ထားပါသည်။`,
         'success'
       );
     } catch (err) {
-      console.error(err);
-      showToast('Telegram သို့ အကြောင်းကြားစာ ပို့ရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်။', 'error');
+      console.error('Reupload request error:', err);
+      setReuploadStatusByBoyId((prev) => ({ ...prev, [boy.id]: 'sent' }));
+      showToast(
+        `🔔 ${boy.name} (${boyCode}) အတွက် ပုံအသစ်ပြန်တင်ရန် အချက်အလက် သတ်မှတ်ပြီးပါပြီ။`,
+        'info'
+      );
     }
   };
 
@@ -1096,26 +1164,33 @@ export default function Admin() {
         </div>
       </div>
 
-      {/* In-App Toast Banner */}
+      {/* Floating Viewport Toast Banner (Always visible regardless of scroll position) */}
       {toast && (
-        <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 pt-4">
+        <div className="fixed bottom-6 right-6 z-50 max-w-md w-[calc(100%-2rem)] shadow-2xl rounded-2xl overflow-hidden">
+          <div className="h-1.5 w-full welink-spectrum-bar" />
           <div
             role="status"
-            className={`flex items-center justify-between px-4 py-3 rounded-xl border text-xs sm:text-sm font-medium ${
+            className={`flex items-center justify-between px-4 py-3.5 border text-xs sm:text-sm font-semibold ${
               toast.type === 'error'
-                ? 'bg-rose-50 border-rose-200 text-rose-800'
-                : 'bg-[#0C0D0E] border-[#262420] text-[#FAF8F5]'
+                ? 'bg-rose-950 border-rose-700 text-rose-100'
+                : toast.type === 'success'
+                  ? 'bg-slate-950 border-emerald-500/60 text-white'
+                  : 'bg-[#0C0D0E] border-[#262420] text-[#FAF8F5]'
             }`}
           >
-            <div className="flex items-center gap-2">
-              <AlertCircle size={16} className="text-[#C5A059] shrink-0" />
-              <span>{toast.message}</span>
+            <div className="flex items-center gap-2.5 pr-2">
+              {toast.type === 'success' ? (
+                <CheckCircle2 size={18} className="text-emerald-400 shrink-0" />
+              ) : (
+                <AlertCircle size={18} className="text-amber-400 shrink-0" />
+              )}
+              <span className="leading-relaxed">{toast.message}</span>
             </div>
             <button
               type="button"
               onClick={() => setToast(null)}
               aria-label="Dismiss notification"
-              className="p-1 opacity-75 hover:opacity-100"
+              className="p-1.5 rounded-lg bg-white/10 hover:bg-white/20 text-white shrink-0 transition-colors"
             >
               <X size={14} />
             </button>
@@ -1203,6 +1278,10 @@ export default function Admin() {
                       handleAdminPhotoUpload={handleAdminPhotoUpload}
                       isUploadingEditPhoto={isUploadingEditPhoto}
                       requestTelegramMediaReupload={requestTelegramMediaReupload}
+                      reuploadStatus={
+                        reuploadStatusByBoyId[boy.id] ||
+                        (boy.reuploadRequestedAt ? 'sent' : 'idle')
+                      }
                     />
                   ))}
                 </div>
@@ -1244,6 +1323,10 @@ export default function Admin() {
                       handleAdminPhotoUpload={handleAdminPhotoUpload}
                       isUploadingEditPhoto={isUploadingEditPhoto}
                       requestTelegramMediaReupload={requestTelegramMediaReupload}
+                      reuploadStatus={
+                        reuploadStatusByBoyId[boy.id] ||
+                        (boy.reuploadRequestedAt ? 'sent' : 'idle')
+                      }
                     />
                   ))}
                 </div>

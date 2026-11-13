@@ -383,13 +383,16 @@ async function sendMessage(chatId, text, replyMarkup = null) {
   try {
     const body = { chat_id: chatId, text, parse_mode: "HTML", protect_content: true };
     if (replyMarkup) body.reply_markup = replyMarkup;
-    await fetch(`${TELEGRAM_API}/sendMessage`, {
+    const response = await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),
     });
+    const data = await response.json();
+    return data;
   } catch (err) {
     console.error("SendMessage Error:", err);
+    return { ok: false, error: err.message };
   }
 }
 
@@ -760,30 +763,50 @@ export default async function handler(req, res) {
     }
 
     const baseUrl = getBaseUrl(req);
+    const reqBody =
+      typeof req.body === "string" ? JSON.parse(req.body || "{}") : req.body || {};
 
-    if (req.body.internal_action === "notify_user") {
+    if (reqBody.internal_action === "notify_user") {
       await sendMessage(
-        req.body.chatId,
-        req.body.text,
-        req.body.useMenu ? MAIN_MENU_KEYBOARD : null
+        reqBody.chatId,
+        reqBody.text,
+        reqBody.useMenu ? MAIN_MENU_KEYBOARD : null
       );
       return res.status(200).json({ status: "notified" });
     }
 
-    if (req.body.internal_action === "reject_user") {
+    if (reqBody.internal_action === "reject_user") {
       await handleUserRejection(
-        req.body.chatId,
-        req.body.text,
-        `tg://user?id=${req.body.chatId}`
+        reqBody.chatId,
+        reqBody.text,
+        `tg://user?id=${reqBody.chatId}`
       );
       return res.status(200).json({ status: "rejected" });
     }
 
-    if (req.body.internal_action === "request_media_reupload") {
-      const targetBoyId = String(req.body.boyId || "");
-      const targetChatId = req.body.chatId;
-      if (targetBoyId && targetChatId) {
-        const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+    if (reqBody.internal_action === "request_media_reupload") {
+      const targetBoyId = String(reqBody.boyId || "");
+      if (!targetBoyId) {
+        return res.status(400).json({ error: "Missing boyId" });
+      }
+
+      const boySnap = await getDoc(doc(db, "dateboys", targetBoyId));
+      const boyData = boySnap.exists() ? boySnap.data() : {};
+      const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+      const boyName = reqBody.boyName || boyData.name || "Date Boy";
+      const boyPhone = reqBody.boyPhone || boyData.phone || "-";
+      const boyCity = reqBody.boyCity || boyData.city || "-";
+      const boyTownship = reqBody.boyTownship || boyData.township || "-";
+
+      const targetChatId =
+        reqBody.chatId ||
+        boyData.telegramChatId ||
+        (typeof boyData.telegramProfileLink === "string"
+          ? boyData.telegramProfileLink.match(/id=(\d+)/)?.[1]
+          : null);
+
+      let userNotified = false;
+      if (targetChatId) {
         const boyStateRef = doc(db, "telegram_states", String(targetChatId));
         await setDoc(
           boyStateRef,
@@ -793,16 +816,59 @@ export default async function handler(req, res) {
           },
           { merge: true }
         );
-        await sendMessage(
+        const userMsgRes = await sendMessage(
           targetChatId,
-          `📢 <b>WE LINK Admin အသိပေးချက်</b>\n\nသင်၏ Date Boy လျှောက်လွှာ (<b>${boyCode}</b>) မှ ဓာတ်ပုံနှင့် Video များကို စနစ်အသစ်သို့ ပြောင်းလဲသိမ်းဆည်းရန် လိုအပ်ပါသဖြင့် ကျေးဇူးပြု၍ <b>မျက်နှာသေချာမြင်ရသည့် အလှဓာတ်ပုံ (၃) ပုံ</b> ကို ယခု Chat တွင် တစ်ပုံချင်း ပြန်လည်ပေးပို့ပေးပါ ခင်ဗျာ။\n\n(ကိုယ်ရေးအချက်အလက်များ ထပ်မံဖြည့်သွင်းရန် မလိုအပ်ပါ — ပထမဆုံး အလှဓာတ်ပုံ ၁ ပုံကို စတင်ပို့ပေးပါ):`
+          `📢 <b>WE LINK Admin အသိပေးချက်</b>\n\nသင်၏ Date Boy လျှောက်လွှာ (<b>${boyCode} — ${escapeHTML(boyName)}</b>) မှ ဓာတ်ပုံနှင့် Video များကို စနစ်အသစ်သို့ ပြောင်းလဲသိမ်းဆည်းရန် လိုအပ်ပါသဖြင့် ကျေးဇူးပြု၍ <b>မျက်နှာသေချာမြင်ရသည့် အလှဓာတ်ပုံ (၃) ပုံ</b> ကို ယခု Chat တွင် တစ်ပုံချင်း ပြန်လည်ပေးပို့ပေးပါ ခင်ဗျာ။\n\n(ကိုယ်ရေးအချက်အလက်များ ထပ်မံဖြည့်သွင်းရန် မလိုအပ်ပါ — ပထမဆုံး အလှဓာတ်ပုံ ၁ ပုံကို စတင်ပို့ပေးပါ):`
         );
-        return res.status(200).json({ status: "reupload_requested" });
+        userNotified = Boolean(userMsgRes?.ok);
       }
-      return res.status(400).json({ error: "Missing boyId or chatId" });
+
+      // Record timestamp in Firestore so Web Admin UI persists the sent indicator
+      if (boySnap.exists()) {
+        await updateDoc(doc(db, "dateboys", targetBoyId), {
+          reuploadRequestedAt: serverTimestamp(),
+        });
+      }
+
+      // Also notify the Admin's Telegram Bot chat so the Admin sees an instant confirmation notification in Telegram
+      const adminChatId = await getAdminChatId();
+      let adminNotified = false;
+      if (adminChatId) {
+        const statusLine = userNotified
+          ? `✅ <b>${escapeHTML(boyName)}</b> ၏ Telegram Chat သို့ ပုံနှင့် Video အသစ်ပြန်ပို့ပေးရန် အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ။\n(Date Boy မှ ပုံအသစ်ပြန်ပို့သည်နှင့် ဤ Bot သို့ အလိုအလျောက် ရောက်ရှိလာပါမည်)`
+          : `⚠️ Date Boy ထံသို့ တိုက်ရိုက်စာပို့ရာတွင် အခက်အခဲရှိပါသည် (Bot အား ပိတ်ထားခြင်း သို့မဟုတ် Chat ID မရှိခြင်း ဖြစ်နိုင်ပါသည်)။ အောက်ပါခလုတ်ကိုနှိပ်၍ Admin ကိုယ်တိုင် ပုံ/Video အသစ် လဲလှယ်နိုင်ပါသည်။`;
+
+        const adminNotiText =
+          `🔔 <b>ပုံနှင့် Video အသစ်ပြန်တောင်းဆိုမှု အသိပေးချက် (Web Admin)</b>\n\n` +
+          `🆔 <b>Code:</b> ${boyCode}\n` +
+          `👤 <b>အမည်:</b> ${escapeHTML(boyName)}\n` +
+          `📞 <b>ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+          statusLine;
+
+        const adminKeyboard = {
+          inline_keyboard: [
+            [
+              {
+                text: "🔄 Admin ကိုယ်တိုင် ပုံ/Video အသစ်လဲမည်",
+                callback_data: `ADM_MEDIA_${targetBoyId}`,
+              },
+            ],
+          ],
+        };
+        const admRes = await sendMessage(adminChatId, adminNotiText, adminKeyboard);
+        adminNotified = Boolean(admRes?.ok);
+      }
+
+      return res.status(200).json({
+        status: "reupload_requested",
+        boyCode,
+        userNotified,
+        adminNotified,
+      });
     }
 
-    const { message, callback_query } = req.body;
+    const { message, callback_query } = reqBody;
     let chatId,
       text = "",
       photos = [],
