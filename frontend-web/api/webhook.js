@@ -381,7 +381,13 @@ const MAIN_MENU_KEYBOARD = {
 
 async function sendMessage(chatId, text, replyMarkup = null) {
   try {
-    const body = { chat_id: chatId, text, parse_mode: "HTML", protect_content: true };
+    const body = {
+      chat_id: chatId,
+      text,
+      parse_mode: "HTML",
+      protect_content: true,
+      disable_web_page_preview: true,
+    };
     if (replyMarkup) body.reply_markup = replyMarkup;
     const response = await fetch(`${TELEGRAM_API}/sendMessage`, {
       method: "POST",
@@ -415,6 +421,33 @@ async function getPermanentMediaUrl(fileId, baseUrl, isVideo = false) {
     console.error("Error verifying Telegram file_id:", e);
   }
   return null;
+}
+
+/**
+ * Downloads a compact medium-resolution Telegram photo and returns a permanent
+ * data:image/jpeg;base64,... string if under 80KB so Web Admin renders it in 0ms
+ * directly from Firestore without any external request.
+ */
+async function fetchTelegramPhotoDataUrl(fileId) {
+  if (!BOT_TOKEN || !fileId) return null;
+  try {
+    const metaRes = await fetch(`${TELEGRAM_API}/getFile?file_id=${encodeURIComponent(fileId)}`);
+    const metaData = await metaRes.json();
+    const filePath = metaData?.result?.file_path;
+    if (!metaData?.ok || !filePath) return null;
+    if (metaData.result.file_size && metaData.result.file_size > 85 * 1024) {
+      return null;
+    }
+    const imgRes = await fetch(`https://api.telegram.org/file/bot${BOT_TOKEN}/${filePath}`);
+    if (!imgRes.ok) return null;
+    const arrBuf = await imgRes.arrayBuffer();
+    if (arrBuf.byteLength > 85 * 1024) return null;
+    const base64 = Buffer.from(arrBuf).toString("base64");
+    return `data:image/jpeg;base64,${base64}`;
+  } catch (e) {
+    console.error("fetchTelegramPhotoDataUrl fallback to proxy:", e);
+    return null;
+  }
 }
 
 /**
@@ -457,7 +490,8 @@ async function streamTelegramFilePathToResponse(res, filePath, explicitType = ""
   res.setHeader("Content-Type", contentType);
   res.setHeader("Content-Disposition", "inline");
   res.setHeader("Cache-Control", "public, max-age=3000");
-  return res.status(200).send(buffer);
+  res.statusCode = 200;
+  return res.end(buffer);
 }
 
 /**
@@ -614,7 +648,8 @@ async function handleMediaProxyGet(req, res) {
           res.setHeader("Content-Type", mimeType);
           res.setHeader("Content-Disposition", "inline");
           res.setHeader("Cache-Control", "public, max-age=3600");
-          return res.status(200).send(buffer);
+          res.statusCode = 200;
+          return res.end(buffer);
         }
       }
 
@@ -784,6 +819,237 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: "rejected" });
     }
 
+    // Web App Admin Approve Action -> Notifies BOTH Date Boy AND Admin Telegram Bot
+    if (reqBody.internal_action === "web_admin_approve_boy") {
+      const targetBoyId = String(reqBody.boyId || "");
+      const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+      const boySnap = targetBoyId ? await getDoc(doc(db, "dateboys", targetBoyId)) : null;
+      const boyData = boySnap?.exists() ? boySnap.data() : {};
+
+      const boyName = reqBody.boyName || boyData.name || "Date Boy";
+      const boyAge = reqBody.boyAge || boyData.age || "-";
+      const boyHeight = reqBody.boyHeight || boyData.height || "-";
+      const boyCockSize = reqBody.boyCockSize || boyData.cockSize || "N/A";
+      const boyPhone = reqBody.boyPhone || boyData.phone || "-";
+      const boyCity = reqBody.boyCity || boyData.city || "-";
+      const boyTownship = reqBody.boyTownship || boyData.township || "-";
+      const adminUsername = reqBody.adminUsername || "Web Admin";
+
+      const targetChatId =
+        reqBody.chatId ||
+        boyData.telegramChatId ||
+        (typeof boyData.telegramProfileLink === "string"
+          ? boyData.telegramProfileLink.match(/id=(\d+)/)?.[1]
+          : null);
+
+      const tgProfileLink =
+        reqBody.telegramProfileLink ||
+        boyData.telegramProfileLink ||
+        (targetChatId ? `tg://user?id=${targetChatId}` : "");
+
+      let userNotified = false;
+      if (targetChatId) {
+        const approveMsg =
+          reqBody.text ||
+          `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
+        const uRes = await sendMessage(targetChatId, approveMsg, MAIN_MENU_KEYBOARD);
+        userNotified = Boolean(uRes?.ok);
+      }
+
+      const adminChatId = await getAdminChatId();
+      let adminNotified = false;
+      if (adminChatId) {
+        const tgLinkLine = tgProfileLink
+          ? `🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgProfileLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန် (ဒီကိုနှိပ်ပါ)</a>\n\n`
+          : "";
+        const userStatusLine = userNotified
+          ? `✅ Date Boy (${escapeHTML(boyName)}) ၏ Telegram သို့ အတည်ပြုကြောင်းနှင့် ID <code>${boyCode}</code> ပေးပို့ပြီးပါပြီ။`
+          : `ℹ️ Web Admin မှ အတည်ပြုပြီးပါပြီ (Website မှ လျှောက်ထားသူ သို့မဟုတ် Telegram Chat ID မရှိပါ)။`;
+
+        const adminMsg =
+          `✅ <b>Date Boy အတည်ပြုပြီးပါပြီ (Web Admin Approved)</b>\n\n` +
+          `🆔 <b>Code:</b> ${boyCode}\n` +
+          `👤 <b>အမည်:</b> ${escapeHTML(boyName)}\n` +
+          `🎂 <b>အသက်:</b> ${escapeHTML(boyAge)} နှစ် | 📏 <b>အရပ်:</b> ${escapeHTML(boyHeight)} | 🍆 <b>Size:</b> ${escapeHTML(boyCockSize)}\n` +
+          `📞 <b>ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
+          `🛡️ <b>စစ်ဆေးသူ:</b> ${escapeHTML(adminUsername)}\n` +
+          tgLinkLine +
+          userStatusLine;
+
+        const inlineRows = [];
+        if (tgProfileLink) {
+          inlineRows.push([
+            {
+              text: `💬 ${boyName} နှင့် တိုက်ရိုက်စကားပြောရန်`,
+              url: tgProfileLink,
+            },
+          ]);
+        }
+
+        let admRes = await sendMessage(
+          adminChatId,
+          adminMsg,
+          inlineRows.length > 0 ? { inline_keyboard: inlineRows } : null
+        );
+        if (!admRes?.ok && inlineRows.length > 0) {
+          admRes = await sendMessage(adminChatId, adminMsg);
+        }
+        adminNotified = Boolean(admRes?.ok);
+      }
+
+      return res.status(200).json({
+        status: "approved",
+        boyCode,
+        userNotified,
+        adminNotified,
+      });
+    }
+
+    // Web App Admin Reject / Delete Action -> Notifies BOTH Date Boy AND Admin Telegram Bot
+    if (reqBody.internal_action === "web_admin_reject_boy") {
+      const targetBoyId = String(reqBody.boyId || "");
+      const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+      const boyName = reqBody.boyName || "Date Boy";
+      const boyPhone = reqBody.boyPhone || "-";
+      const boyCity = reqBody.boyCity || "-";
+      const boyTownship = reqBody.boyTownship || "-";
+      const wasPending = Boolean(reqBody.wasPending);
+      const reasonLabel = reqBody.reasonLabel || "သတ်မှတ်ချက်များနှင့် မကိုက်ညီခြင်း";
+      const reasonMsg =
+        reqBody.text ||
+        "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
+      const adminUsername = reqBody.adminUsername || "Web Admin";
+
+      const targetChatId =
+        reqBody.chatId ||
+        (typeof reqBody.telegramProfileLink === "string"
+          ? reqBody.telegramProfileLink.match(/id=(\d+)/)?.[1]
+          : null);
+
+      const tgProfileLink =
+        reqBody.telegramProfileLink || (targetChatId ? `tg://user?id=${targetChatId}` : "");
+
+      let userNotified = false;
+      if (wasPending && targetChatId) {
+        await handleUserRejection(targetChatId, reasonMsg, tgProfileLink);
+        userNotified = true;
+      }
+
+      const adminChatId = await getAdminChatId();
+      let adminNotified = false;
+      if (adminChatId) {
+        const tgLinkLine = tgProfileLink
+          ? `🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgProfileLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန် (ဒီကိုနှိပ်ပါ)</a>\n\n`
+          : "";
+        const actionHeader = wasPending
+          ? `❌ <b>Date Boy လျှောက်လွှာ ပယ်ချပြီးပါပြီ (Web Admin Rejected)</b>`
+          : `🗑️ <b>Date Boy စာရင်းမှ ပယ်ဖျက်ပြီးပါပြီ (Web Admin Removed)</b>`;
+        const userStatusLine = userNotified
+          ? `✅ Date Boy (${escapeHTML(boyName)}) ၏ Telegram သို့ ပယ်ချသည့် အကြောင်းရင်း ပေးပို့ပြီးပါပြီ။`
+          : `ℹ️ စနစ်ထဲမှ ပယ်ဖျက်ပြီးပါပြီ။`;
+
+        const adminMsg =
+          `${actionHeader}\n\n` +
+          `🆔 <b>Code:</b> ${boyCode}\n` +
+          `👤 <b>အမည်:</b> ${escapeHTML(boyName)}\n` +
+          `📞 <b>ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
+          `📋 <b>အကြောင်းရင်း:</b> ${escapeHTML(reasonLabel)}\n` +
+          `🛡️ <b>စစ်ဆေးသူ:</b> ${escapeHTML(adminUsername)}\n` +
+          tgLinkLine +
+          userStatusLine;
+
+        const inlineRows = [];
+        if (tgProfileLink) {
+          inlineRows.push([
+            {
+              text: `💬 ${boyName} နှင့် တိုက်ရိုက်စကားပြောရန်`,
+              url: tgProfileLink,
+            },
+          ]);
+        }
+
+        let admRes = await sendMessage(
+          adminChatId,
+          adminMsg,
+          inlineRows.length > 0 ? { inline_keyboard: inlineRows } : null
+        );
+        if (!admRes?.ok && inlineRows.length > 0) {
+          admRes = await sendMessage(adminChatId, adminMsg);
+        }
+        adminNotified = Boolean(admRes?.ok);
+      }
+
+      return res.status(200).json({
+        status: "rejected",
+        boyCode,
+        userNotified,
+        adminNotified,
+      });
+    }
+
+    // Website /register New Date Boy Application -> Notify Admin Telegram Bot immediately
+    if (reqBody.internal_action === "web_new_registration") {
+      const targetBoyId = String(reqBody.boyId || "");
+      const boyCode = `WLDB-${targetBoyId.substring(0, 5).toUpperCase()}`;
+      const adminChatId = await getAdminChatId();
+      if (adminChatId && targetBoyId) {
+        const boySnap = await getDoc(doc(db, "dateboys", targetBoyId));
+        const boyData = boySnap.exists() ? boySnap.data() : reqBody;
+        const publicLinks = processMediaLinks(boyData.publicPhotos || [], "Public ပုံ", {
+          baseUrl,
+          boyId: targetBoyId,
+          mediaType: "public",
+        });
+        const privateLinks = processMediaLinks(boyData.privatePhotos || [], "Private ပုံ", {
+          baseUrl,
+          boyId: targetBoyId,
+          mediaType: "private",
+        });
+        const adminMsg =
+          `🚨 <b>New Date Boy Registration (Website) — ${boyCode}</b> 🚨\n\n` +
+          `🆔 <b>Code:</b> ${boyCode}\n` +
+          `👤 <b>အမည်:</b> ${escapeHTML(boyData.name)}\n` +
+          `🎂 <b>အသက်:</b> ${escapeHTML(boyData.age)} နှစ်\n` +
+          `📏 <b>အရပ်:</b> ${escapeHTML(boyData.height)} | 🍆 <b>Size:</b> ${escapeHTML(boyData.cockSize || "N/A")}\n` +
+          `📞 <b>ဖုန်း:</b> ${escapeHTML(boyData.phone)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyData.township)}, ${escapeHTML(boyData.city)}\n` +
+          `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(boyData.address)}\n\n` +
+          `📸 <b>Public:</b> ${publicLinks || "Web Admin တွင်ကြည့်ရန်"}\n` +
+          `🔒 <b>Private:</b> ${privateLinks || "Web Admin တွင်ကြည့်ရန်"}\n\n` +
+          `🌐 <i>Website (/register) မှ တိုက်ရိုက်လျှောက်ထားသူ ဖြစ်ပါသည်။</i>`;
+
+        await sendMessage(adminChatId, adminMsg, {
+          inline_keyboard: [
+            [
+              { text: "✅ Approve", callback_data: `APP_D_0_${targetBoyId}` },
+              { text: "❌ Reject", callback_data: `REJ_D_0_${targetBoyId}` },
+            ],
+          ],
+        });
+      }
+      return res.status(200).json({ status: "notified_admin" });
+    }
+
+    // Website / Booking Reservation -> Notify Admin Telegram Bot immediately
+    if (reqBody.internal_action === "web_new_booking") {
+      const adminChatId = await getAdminChatId();
+      if (adminChatId) {
+        const msg =
+          `🛎️ <b>New Web Concierge Reservation (${escapeHTML(reqBody.bookingRef || "WL-BOOKING")})</b>\n\n` +
+          `👤 <b>Date Boy:</b> ${escapeHTML(reqBody.dateBoyName)} (${escapeHTML(reqBody.dateBoyCode)})\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(reqBody.dateBoyTownship)}, ${escapeHTML(reqBody.dateBoyCity)}\n` +
+          `🧑‍💼 <b>Client အမည်:</b> ${escapeHTML(reqBody.clientName)}\n` +
+          `📞 <b>ဆက်သွယ်ရန်:</b> ${escapeHTML(reqBody.clientContact)}\n` +
+          `📅 <b>ရက်စွဲ/အချိန်:</b> ${escapeHTML(reqBody.preferredDate)} · ${escapeHTML(reqBody.preferredTime)}\n` +
+          `🕒 <b>Package:</b> ${escapeHTML(reqBody.duration)}\n` +
+          `📝 <b>မှတ်ချက်:</b> ${escapeHTML(reqBody.notes || "-")}`;
+        await sendMessage(adminChatId, msg);
+      }
+      return res.status(200).json({ status: "notified_admin" });
+    }
+
     if (reqBody.internal_action === "request_media_reupload") {
       const targetBoyId = String(reqBody.boyId || "");
       if (!targetBoyId) {
@@ -913,9 +1179,13 @@ export default async function handler(req, res) {
       username = message.from.username || message.from.first_name;
 
       let targetFileId = null;
+      let compactPhotoFileId = null;
       let isVideoMedia = false;
       if (message.photo && message.photo.length > 0) {
         targetFileId = message.photo[message.photo.length - 1].file_id;
+        // Pick medium resolution (~320-800px, ~20-45KB) for fast Base64 Firestore preview
+        const mediumIdx = Math.min(1, message.photo.length - 1);
+        compactPhotoFileId = message.photo[mediumIdx].file_id;
       } else if (message.video) {
         targetFileId = message.video.file_id;
         isVideoMedia = true;
@@ -928,8 +1198,14 @@ export default async function handler(req, res) {
 
       if (targetFileId) {
         fileIdToForward = targetFileId;
-        const fileUrl = await getPermanentMediaUrl(targetFileId, baseUrl, isVideoMedia);
-        if (fileUrl) photos.push(fileUrl);
+        let storedUrl = null;
+        if (compactPhotoFileId && !isVideoMedia) {
+          storedUrl = await fetchTelegramPhotoDataUrl(compactPhotoFileId);
+        }
+        if (!storedUrl) {
+          storedUrl = await getPermanentMediaUrl(targetFileId, baseUrl, isVideoMedia);
+        }
+        if (storedUrl) photos.push(storedUrl);
       }
     } else if (callback_query) {
       chatId = callback_query.message.chat.id;
@@ -1296,7 +1572,9 @@ export default async function handler(req, res) {
         reasonMsg = "❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။";
 
       await deleteDoc(doc(db, "dateboys", boyId));
-      await handleUserRejection(clientChatId, reasonMsg, tgLink);
+      if (clientChatId && clientChatId !== "0") {
+        await handleUserRejection(clientChatId, reasonMsg, tgLink);
+      }
       await sendMessage(
         chatId,
         `❌ <b>${escapeHTML(boyName)}</b> ၏ လျှောက်လွှာကို ပယ်ချပြီး အကြောင်းရင်းကို User ထံ ပို့ပေးလိုက်ပါပြီ။`
@@ -1408,12 +1686,23 @@ export default async function handler(req, res) {
         );
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
       } else if (action === "APP_D") {
-        await updateDoc(doc(db, "dateboys", boyId), { status: "approved" });
+        await updateDoc(doc(db, "dateboys", boyId), {
+          status: "approved",
+          approvedAt: serverTimestamp(),
+        });
         const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။\n\nအထူးသတိပြုရန်မှာ Date Boy စာရင်းသို့ပေါင်းထည့်လိုက်ပြီး ခေါ်ယူလိုသည့်ဧည့်သည်များကို ပြသသည့်စာရင်းထဲတွင် ပါဝင်ပြီးဖြစ်သော်လည်း အလုပ်ရရှိရန်အတွက် မိမိအား ခေါ်ယူမည့် ဧည့်သည်ကြိုက်ရန်လည်း လိုအပ်ပါသေးသည်။\n\nလုပ်ငန်းလိုအပ်ချက်အရ အပြင်လူတွေ့ အင်တာဗျူးရန် လိုအပ်ပါက နေရာနှင့် အချိန်အသေးစိတ်ကို Admin မှ ပြန်လည်ဆက်သွယ်ပေးသွားပါမည်။`;
-        await sendMessage(clientChatId, approveMsg, MAIN_MENU_KEYBOARD);
+        if (clientChatId && clientChatId !== "0") {
+          await sendMessage(clientChatId, approveMsg, MAIN_MENU_KEYBOARD);
+        }
+        const tgLink =
+          boy.telegramProfileLink ||
+          (clientChatId && clientChatId !== "0" ? `tg://user?id=${clientChatId}` : "");
+        const tgLinkLine = tgLink
+          ? `\n🔗 <b>Telegram ဖြင့် ဆက်သွယ်ရန်:</b> <a href="${tgLink}">💬 ${escapeHTML(boy.name)} နှင့် တိုက်ရိုက်စကားပြောရန်</a>`
+          : "";
         await sendMessage(
           chatId,
-          `✅ <b>${escapeHTML(boy.name)} (${boyCode})</b> ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။`
+          `✅ <b>${escapeHTML(boy.name)} (${boyCode})</b> ကို Date Boy အဖြစ် အတည်ပြုလိုက်ပါပြီ။${tgLinkLine}`
         );
       } else if (action === "REJ_D") {
         const reasonKeyboard = {

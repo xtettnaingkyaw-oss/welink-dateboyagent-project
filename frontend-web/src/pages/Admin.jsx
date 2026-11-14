@@ -45,11 +45,19 @@ import {
   UploadCloud,
   Send,
   Loader2,
+  Search,
+  ArrowUpDown,
+  MessageCircle,
+  ExternalLink,
 } from 'lucide-react';
 import {
   FALLBACK_PORTRAITS,
   resolveMediaUrl,
   isLegacyExpiredProneTelegramMedia,
+  formatCompanionDateBadge,
+  computeAdminDateCounts,
+  filterAndSortAdminCompanions,
+  toLocalDateKey,
 } from '../utils/catalogLogic';
 
 const DateBoyCard = ({
@@ -61,6 +69,7 @@ const DateBoyCard = ({
   setEditingBoyId,
   saveEditedBoy,
   handleApprove,
+  approvingBoyId,
   openRejectOrDeleteModal,
   handleToggleVisibility,
   startEditBoy,
@@ -105,17 +114,24 @@ const DateBoyCard = ({
   );
 
   const isEditing = editingBoyId === boy.id;
+  const isApproving = approvingBoyId === boy.id;
   const boyCode = `WLDB-${boy.id.substring(0, 5).toUpperCase()}`;
   const hasLegacyLinks = isLegacyExpiredProneTelegramMedia(boy) || brokenImgDetected;
+  const dateBadgeText = formatCompanionDateBadge(boy);
+  const isTodaySubmission = dateBadgeText.startsWith('ယနေ့');
+  const tgChatHref =
+    boy.telegramProfileLink || (boy.telegramChatId ? `tg://user?id=${boy.telegramChatId}` : '');
 
   return (
     <div
       className={`bg-white border ${
         boy.status === 'hidden'
           ? 'border-[#D6CFC5] opacity-65'
-          : isPending
-            ? 'border-[#C5A059]'
-            : 'border-[#E6DFD3]'
+          : isTodaySubmission && isPending
+            ? 'border-emerald-500 ring-1 ring-emerald-500/20 shadow-sm'
+            : isPending
+              ? 'border-[#C5A059]'
+              : 'border-[#E6DFD3]'
       } p-5 sm:p-6 rounded-xl flex flex-col justify-between relative transition-colors`}
     >
       {boy.status === 'hidden' && (
@@ -237,9 +253,21 @@ const DateBoyCard = ({
         ) : (
           <>
             <div className="mb-4">
-              <p className="font-mono text-[11px] font-semibold text-[#9E7B36] tracking-wider tabular-nums">
-                {boyCode} {isPending ? '· PENDING REVIEW' : '· APPROVED ROSTER'}
-              </p>
+              <div className="flex flex-wrap items-center justify-between gap-1.5 mb-1.5">
+                <p className="font-mono text-[11px] font-semibold text-[#9E7B36] tracking-wider tabular-nums">
+                  {boyCode} {isPending ? '· PENDING' : '· APPROVED'}
+                </p>
+                <span
+                  className={`inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-mono font-semibold tabular-nums ${
+                    isTodaySubmission
+                      ? 'bg-emerald-50 text-emerald-800 border border-emerald-200'
+                      : 'bg-[#FAF8F5] text-[#6E675F] border border-[#E6DFD3]'
+                  }`}
+                >
+                  <Clock size={10} className={isTodaySubmission ? 'text-emerald-600' : 'text-[#9E7B36]'} />
+                  <span>{dateBadgeText}</span>
+                </span>
+              </div>
               <h4 className="font-serif text-2xl font-semibold text-[#0C0D0E] mt-0.5">
                 {boy.name}
               </h4>
@@ -317,6 +345,20 @@ const DateBoyCard = ({
               >
                 {boy.address || 'No street address'}
               </p>
+              {tgChatHref && (
+                <div className="pt-2 border-t border-[#E6DFD3]">
+                  <a
+                    href={tgChatHref}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="w-full inline-flex items-center justify-center gap-1.5 py-2 px-3 rounded-lg bg-[#0C0D0E] hover:bg-[#1E2126] text-[#FAF8F5] font-semibold text-[11px] transition-colors"
+                  >
+                    <MessageCircle size={13} className="text-amber-400 shrink-0" />
+                    <span>Telegram Chat ဖြင့် တိုက်ရိုက်စကားပြောရန်</span>
+                    <ExternalLink size={11} className="opacity-70 shrink-0" />
+                  </a>
+                </div>
+              )}
             </div>
           </>
         )}
@@ -423,10 +465,18 @@ const DateBoyCard = ({
           <>
             <button
               type="button"
+              disabled={isApproving}
               onClick={() => handleApprove(boy.id)}
-              className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-2.5 rounded-lg font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors text-xs"
+              className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-2.5 rounded-lg font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] active:scale-95 disabled:opacity-60 transition-all text-xs flex items-center justify-center gap-1.5 cursor-pointer"
             >
-              Approve
+              {isApproving ? (
+                <>
+                  <Loader2 size={13} className="animate-spin text-amber-400" />
+                  <span>Approving...</span>
+                </>
+              ) : (
+                <span>Approve</span>
+              )}
             </button>
             <button
               type="button"
@@ -440,7 +490,7 @@ const DateBoyCard = ({
             <button
               type="button"
               onClick={() => openRejectOrDeleteModal(boy)}
-              className="px-3 bg-rose-50 text-rose-700 py-2.5 rounded-lg font-semibold hover:bg-rose-100 transition-colors text-xs border border-rose-200"
+              className="px-3 bg-rose-50 text-rose-700 py-2.5 rounded-lg font-semibold hover:bg-rose-100 active:scale-95 transition-all text-xs border border-rose-200 cursor-pointer"
             >
               Reject
             </button>
@@ -536,6 +586,14 @@ export default function Admin() {
   const [editBoyData, setEditBoyData] = useState({});
   const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState('');
   const [reuploadStatusByBoyId, setReuploadStatusByBoyId] = useState({});
+  const [approvingBoyId, setApprovingBoyId] = useState(null);
+  const [isRejectingBoy, setIsRejectingBoy] = useState(false);
+
+  // Date & Search Filtering State for Pending & Approved Dossiers
+  const [dateFilter, setDateFilter] = useState('all'); // 'all' | 'today' | 'yesterday' | 'custom'
+  const [customDate, setCustomDate] = useState(() => toLocalDateKey(Date.now()));
+  const [adminSearchQuery, setAdminSearchQuery] = useState('');
+  const [adminSortOrder, setAdminSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '',
@@ -704,6 +762,23 @@ export default function Admin() {
   const approvedBoys = boys.filter(
     (boy) => boy.status === 'approved' || boy.status === 'hidden'
   );
+  const pendingDateCounts = computeAdminDateCounts(pendingBoys);
+  const approvedDateCounts = computeAdminDateCounts(approvedBoys);
+
+  const filteredPendingBoys = filterAndSortAdminCompanions(pendingBoys, {
+    dateFilter,
+    customDate,
+    searchQuery: adminSearchQuery,
+    sortOrder: adminSortOrder,
+  });
+
+  const filteredApprovedBoys = filterAndSortAdminCompanions(approvedBoys, {
+    dateFilter,
+    customDate,
+    searchQuery: adminSearchQuery,
+    sortOrder: adminSortOrder,
+  });
+
   const pendingLocations = locations.filter((loc) => loc.status === 'pending');
   const approvedLocations = locations.filter((loc) => loc.status !== 'pending');
 
@@ -713,20 +788,41 @@ export default function Admin() {
   const handleApprove = async (id) => {
     const boy = boys.find((b) => b.id === id);
     const boyCode = `WLDB-${id.substring(0, 5).toUpperCase()}`;
-    await updateDoc(doc(db, 'dateboys', id), { status: 'approved' });
-    showToast(`${boy?.name || boyCode} အား အတည်ပြုပြီးပါပြီ။`, 'success');
-    if (boy && boy.telegramChatId) {
-      const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။`;
-      fetch('/api/webhook', {
+    setApprovingBoyId(id);
+    try {
+      await updateDoc(doc(db, 'dateboys', id), {
+        status: 'approved',
+        approvedAt: serverTimestamp(),
+      });
+
+      const approveMsg = `🎉 ကျေးဇူးတင်ပါတယ်။ သတ်မှတ်အရည်အချင်းများနှင့် ပြည့်စုံကိုက်ညီသောကြောင့် သင့်အား WE LINK ၏ Date Boy စာရင်းထဲသို့ ပေါင်းထည့်ပေးလိုက်ပါပြီ။\n\n📌 သင့်၏ Date Boy ID မှာ: <code>${boyCode}</code> ဖြစ်ပါသည်။ Privacy အရ သင်၏ အမည်အရင်းကို ဧည့်သည်အားပြသမည်မဟုတ်သောကြောင့် ယခု ID အား သေချာစွာမှတ်သားထားပေးပါ။\n\nမန္တလေးမြို့တွင်းဆိုရင် ချက်ချင်း(သို့မဟုတ်) (၁)ရက် (၂) ရက်အတွင်းရရှိနိုင်ပြီး အခြားမြို့များကဆိုရင် အနည်းဆုံး (၁)ပတ်ကနေ ဧည့်သည်အခြေအနေပေါ်မူတည်ပြီး စောင့်ရနိုင်ပါသည်။`;
+
+      await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          internal_action: 'notify_user',
-          chatId: boy.telegramChatId,
+          internal_action: 'web_admin_approve_boy',
+          boyId: id,
+          chatId: boy?.telegramChatId || null,
+          telegramProfileLink: boy?.telegramProfileLink || '',
+          boyName: boy?.name || '',
+          boyAge: boy?.age || '',
+          boyHeight: boy?.height || '',
+          boyCockSize: boy?.cockSize || '',
+          boyPhone: boy?.phone || '',
+          boyCity: boy?.city || '',
+          boyTownship: boy?.township || '',
+          adminUsername: loggedInAdmin?.username || 'Web Admin',
           text: approveMsg,
-          useMenu: true,
         }),
       }).catch((e) => console.error(e));
+
+      showToast(
+        `✅ ${boy?.name || boyCode} (${boyCode}) အား အတည်ပြုပြီး Date Boy နှင့် Admin Telegram Bot သို့ အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ။`,
+        'success'
+      );
+    } finally {
+      setApprovingBoyId(null);
     }
   };
 
@@ -737,40 +833,63 @@ export default function Admin() {
   };
 
   const confirmRejectOrDeleteBoy = async () => {
-    if (!rejectTargetBoy) return;
+    if (!rejectTargetBoy || isRejectingBoy) return;
     const boy = rejectTargetBoy;
+    const boyCode = `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`;
+    const wasPending = boy.status === 'pending';
 
+    let reasonLabel = 'သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း';
     let reasonMsg =
       '❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို အောက်ပါအကြောင်းရင်းကြောင့် ပယ်ချလိုက်ပါသည် -\n\n';
     if (rejectReasonPreset === '1') {
+      reasonLabel = 'သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း';
       reasonMsg += '👉 <b>သတ်မှတ်အရည်အချင်းများနှင့် မကိုက်ညီခြင်း</b>';
     } else if (rejectReasonPreset === '2') {
+      reasonLabel = 'ပေးပို့ထားသော ပုံ/Video များ အဆင်မပြေခြင်း';
       reasonMsg +=
         '👉 <b>ပေးပို့ထားသောပုံများ နှင့် Video အဆင်မပြေခြင်း</b>\n(ကျေးဇူးပြု၍ ပုံများနှင့် Video ကို အသစ်ပြန်လည်စီစဉ်ပြီး အစကနေ ပြန်တင်ပေးပါ ခင်ဗျာ)';
     } else if (rejectReasonPreset === '3') {
+      reasonLabel = 'ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား မကိုက်ညီခြင်း';
       reasonMsg +=
         '👉 <b>ရုပ်ရည်နှင့် ခန္ဓာကိုယ်အချိုးအစား လုပ်ငန်းလိုအပ်ချက်နှင့် အဆင်မပြေခြင်း</b>';
     } else if (rejectReasonPreset === '4' && customRejectReason.trim()) {
+      reasonLabel = customRejectReason.trim();
       reasonMsg += `👉 <b>${customRejectReason.trim()}</b>`;
     } else {
+      reasonLabel = 'ရိုးရိုးပယ်ချခြင်း';
       reasonMsg = '❌ ဝမ်းနည်းပါတယ် ခင်ဗျာ။ သင့်ရဲ့ Date Boy လျှောက်လွှာကို ပယ်ချလိုက်ပါသည်။';
     }
 
-    if (boy.status === 'pending' && boy.telegramChatId) {
-      fetch('/api/webhook', {
+    setIsRejectingBoy(true);
+    try {
+      await fetch('/api/webhook', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          internal_action: 'reject_user',
-          chatId: boy.telegramChatId,
+          internal_action: 'web_admin_reject_boy',
+          boyId: boy.id,
+          chatId: boy.telegramChatId || null,
+          telegramProfileLink: boy.telegramProfileLink || '',
+          boyName: boy.name || '',
+          boyPhone: boy.phone || '',
+          boyCity: boy.city || '',
+          boyTownship: boy.township || '',
+          wasPending,
+          reasonLabel,
           text: reasonMsg,
+          adminUsername: loggedInAdmin?.username || 'Web Admin',
         }),
       }).catch((e) => console.error(e));
-    }
 
-    await deleteDoc(doc(db, 'dateboys', boy.id));
-    setRejectTargetBoy(null);
-    showToast(`${boy.name} ၏ စာရင်းကို ပယ်ဖျက်ပြီးပါပြီ။`, 'info');
+      await deleteDoc(doc(db, 'dateboys', boy.id));
+      setRejectTargetBoy(null);
+      showToast(
+        `❌ ${boy.name} (${boyCode}) အား ပယ်ဖျက်ပြီး Date Boy နှင့် Admin Telegram Bot သို့ အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ။`,
+        'info'
+      );
+    } finally {
+      setIsRejectingBoy(false);
+    }
   };
 
   const handleUnbanUser = async (chatId) => {
@@ -1245,23 +1364,186 @@ export default function Admin() {
 
         {/* Workspace Tab Content */}
         <div>
+          {(activeTab === 'requests' || activeTab === 'dateboys') && (
+            <div className="mb-6 bg-white p-4 sm:p-5 rounded-2xl border border-[#E6DFD3] shadow-sm space-y-4">
+              <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
+                {/* Date Preset Segmented Buttons: All, Today, Yesterday, Custom Date */}
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="text-xs font-semibold text-[#5C564E] mr-1 flex items-center gap-1.5">
+                    <Calendar size={14} className="text-[#9E7B36]" />
+                    <span>ရက်စွဲအလိုက်စစ်ရန်:</span>
+                  </span>
+
+                  {[
+                    {
+                      id: 'all',
+                      label: 'အားလုံး (All)',
+                      count:
+                        activeTab === 'requests'
+                          ? pendingDateCounts.all
+                          : approvedDateCounts.all,
+                    },
+                    {
+                      id: 'today',
+                      label: 'ယနေ့ (Today)',
+                      count:
+                        activeTab === 'requests'
+                          ? pendingDateCounts.today
+                          : approvedDateCounts.today,
+                    },
+                    {
+                      id: 'yesterday',
+                      label: 'မနေ့က (Yesterday)',
+                      count:
+                        activeTab === 'requests'
+                          ? pendingDateCounts.yesterday
+                          : approvedDateCounts.yesterday,
+                    },
+                    {
+                      id: 'custom',
+                      label: 'ရက်စွဲရွေးရန် (Custom Date)',
+                      count: null,
+                    },
+                  ].map((tabItem) => {
+                    const isSelected = dateFilter === tabItem.id;
+                    return (
+                      <button
+                        key={tabItem.id}
+                        type="button"
+                        onClick={() => setDateFilter(tabItem.id)}
+                        className={`px-3.5 py-2 rounded-xl text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          isSelected
+                            ? 'bg-[#0C0D0E] text-[#FAF8F5] shadow-sm'
+                            : 'bg-[#FAF8F5] text-[#5C564E] hover:text-[#0C0D0E] border border-[#E6DFD3]'
+                        }`}
+                      >
+                        <span>{tabItem.label}</span>
+                        {tabItem.count !== null && (
+                          <span
+                            className={`px-1.5 py-0.5 rounded font-mono text-[10px] tabular-nums ${
+                              isSelected
+                                ? 'bg-amber-400 text-slate-950 font-bold'
+                                : 'bg-[#E6DFD3]/70 text-[#0C0D0E]'
+                            }`}
+                          >
+                            {tabItem.count}
+                          </span>
+                        )}
+                      </button>
+                    );
+                  })}
+
+                  {dateFilter === 'custom' && (
+                    <div className="flex items-center gap-2 bg-[#FAF8F5] px-3 py-1.5 rounded-xl border border-[#C5A059]">
+                      <input
+                        type="date"
+                        aria-label="Custom filter date"
+                        value={customDate}
+                        onChange={(e) => setCustomDate(e.target.value)}
+                        className="bg-transparent text-xs font-mono font-semibold text-[#0C0D0E] outline-none cursor-pointer"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Search Input & Newest/Oldest Sort Toggle */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
+                  <div className="relative flex-1 sm:w-72">
+                    <Search
+                      size={14}
+                      className="absolute left-3.5 top-1/2 -translate-y-1/2 text-[#787167]"
+                    />
+                    <input
+                      type="text"
+                      value={adminSearchQuery}
+                      onChange={(e) => setAdminSearchQuery(e.target.value)}
+                      placeholder="အမည်, WLDB-Code, ဖုန်း, မြို့နယ် ရှာရန်..."
+                      className="w-full pl-9 pr-8 py-2 bg-[#FAF8F5] border border-[#E6DFD3] rounded-xl text-xs text-[#0C0D0E] outline-none focus:border-[#0C0D0E] focus:bg-white transition-colors"
+                    />
+                    {adminSearchQuery && (
+                      <button
+                        type="button"
+                        onClick={() => setAdminSearchQuery('')}
+                        aria-label="Clear search"
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#787167] hover:text-[#0C0D0E]"
+                      >
+                        <X size={13} />
+                      </button>
+                    )}
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setAdminSortOrder((prev) => (prev === 'newest' ? 'oldest' : 'newest'))
+                    }
+                    className="px-3.5 py-2 rounded-xl bg-[#FAF8F5] hover:bg-[#F5EFE6] border border-[#E6DFD3] text-xs font-semibold text-[#0C0D0E] flex items-center justify-center gap-1.5 whitespace-nowrap cursor-pointer transition-colors"
+                  >
+                    <ArrowUpDown size={13} className="text-[#9E7B36]" />
+                    <span>
+                      {adminSortOrder === 'newest'
+                        ? 'အသစ်ဆုံး အရင်ပြထားသည် (Newest)'
+                        : 'အဟောင်းဆုံး အရင်ပြထားသည် (Oldest)'}
+                    </span>
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {activeTab === 'requests' && (
             <div className="space-y-6">
-              <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E]">
-                စောင့်ဆိုင်းနေသော လျှောက်လွှာများ (Pending Dossiers)
-              </h2>
-              {pendingBoys.length === 0 ? (
-                <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3]">
-                  <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto mb-3 text-[#9E7B36] border border-[#E6DFD3]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
+                  စောင့်ဆိုင်းနေသော လျှောက်လွှာများ ({filteredPendingBoys.length}
+                  {dateFilter !== 'all' || adminSearchQuery ? ` / ${pendingBoys.length}` : ''})
+                </h2>
+                {(dateFilter !== 'all' || adminSearchQuery) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFilter('all');
+                      setAdminSearchQuery('');
+                    }}
+                    className="text-xs font-semibold text-[#9E7B36] hover:underline cursor-pointer"
+                  >
+                    Filter ပြန်ဖြုတ်မည် (Show All {pendingBoys.length})
+                  </button>
+                )}
+              </div>
+
+              {filteredPendingBoys.length === 0 ? (
+                <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3] space-y-3">
+                  <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto text-[#9E7B36] border border-[#E6DFD3]">
                     <Clock size={22} />
                   </div>
                   <p className="text-sm font-semibold text-[#0C0D0E]">
-                    လောလောဆယ် အသစ်လျှောက်ထားသူ မရှိသေးပါ ခင်ဗျာ။
+                    {dateFilter === 'today'
+                      ? 'ယနေ့ (Today) အသစ်လျှောက်ထားသော Pending Date Boy မရှိသေးပါ။'
+                      : dateFilter === 'yesterday'
+                        ? 'မနေ့က (Yesterday) လျှောက်ထားသော Pending Date Boy မရှိပါ။'
+                        : dateFilter === 'custom'
+                          ? `ရွေးချယ်ထားသော ရက်စွဲ (${customDate}) တွင် လျှောက်ထားသူ မရှိပါ။`
+                          : adminSearchQuery
+                            ? `"${adminSearchQuery}" နှင့် ကိုက်ညီသော လျှောက်လွှာ မတွေ့ရှိပါ။`
+                            : 'လောလောဆယ် အသစ်လျှောက်ထားသူ မရှိသေးပါ ခင်ဗျာ။'}
                   </p>
+                  {pendingBoys.length > 0 && (dateFilter !== 'all' || adminSearchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFilter('all');
+                        setAdminSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
+                    >
+                      <span>Pending အားလုံး ({pendingBoys.length} ဦး) ပြန်ကြည့်မည်</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {pendingBoys.map((boy) => (
+                  {filteredPendingBoys.map((boy) => (
                     <DateBoyCard
                       key={boy.id}
                       boy={boy}
@@ -1272,6 +1554,7 @@ export default function Admin() {
                       setEditingBoyId={setEditingBoyId}
                       saveEditedBoy={saveEditedBoy}
                       handleApprove={handleApprove}
+                      approvingBoyId={approvingBoyId}
                       openRejectOrDeleteModal={openRejectOrDeleteModal}
                       handleToggleVisibility={handleToggleVisibility}
                       startEditBoy={startEditBoy}
@@ -1292,21 +1575,51 @@ export default function Admin() {
 
           {activeTab === 'dateboys' && (
             <div className="space-y-6">
-              <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
-                လက်ရှိ Date Boys အားလုံး ({approvedBoys.length})
-              </h2>
-              {approvedBoys.length === 0 ? (
-                <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3]">
-                  <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto mb-3 text-[#9E7B36] border border-[#E6DFD3]">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
+                  လက်ရှိ Date Boys အားလုံး ({filteredApprovedBoys.length}
+                  {dateFilter !== 'all' || adminSearchQuery ? ` / ${approvedBoys.length}` : ''})
+                </h2>
+                {(dateFilter !== 'all' || adminSearchQuery) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setDateFilter('all');
+                      setAdminSearchQuery('');
+                    }}
+                    className="text-xs font-semibold text-[#9E7B36] hover:underline cursor-pointer"
+                  >
+                    Filter ပြန်ဖြုတ်မည် (Show All {approvedBoys.length})
+                  </button>
+                )}
+              </div>
+
+              {filteredApprovedBoys.length === 0 ? (
+                <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3] space-y-3">
+                  <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto text-[#9E7B36] border border-[#E6DFD3]">
                     <UserCheck size={22} />
                   </div>
                   <p className="text-sm font-semibold text-[#0C0D0E]">
-                    စနစ်ထဲတွင် အတည်ပြုထားသော Date Boy မရှိသေးပါ။
+                    {dateFilter !== 'all' || adminSearchQuery
+                      ? 'ရွေးချယ်ထားသော ရက်စွဲ သို့မဟုတ် ရှာဖွေမှုနှင့် ကိုက်ညီသော Date Boy မရှိပါ။'
+                      : 'စနစ်ထဲတွင် အတည်ပြုထားသော Date Boy မရှိသေးပါ။'}
                   </p>
+                  {approvedBoys.length > 0 && (dateFilter !== 'all' || adminSearchQuery) && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setDateFilter('all');
+                        setAdminSearchQuery('');
+                      }}
+                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
+                    >
+                      <span>Approved အားလုံး ({approvedBoys.length} ဦး) ပြန်ကြည့်မည်</span>
+                    </button>
+                  )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
-                  {approvedBoys.map((boy) => (
+                  {filteredApprovedBoys.map((boy) => (
                     <DateBoyCard
                       key={boy.id}
                       boy={boy}
@@ -1317,6 +1630,7 @@ export default function Admin() {
                       setEditingBoyId={setEditingBoyId}
                       saveEditedBoy={saveEditedBoy}
                       handleApprove={handleApprove}
+                      approvingBoyId={approvingBoyId}
                       openRejectOrDeleteModal={openRejectOrDeleteModal}
                       handleToggleVisibility={handleToggleVisibility}
                       startEditBoy={startEditBoy}
@@ -2295,10 +2609,18 @@ export default function Admin() {
               </button>
               <button
                 type="button"
+                disabled={isRejectingBoy}
                 onClick={confirmRejectOrDeleteBoy}
-                className="flex-1 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold transition-colors"
+                className="flex-1 py-2.5 rounded-lg bg-rose-600 hover:bg-rose-700 disabled:opacity-60 text-white text-xs font-semibold transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
               >
-                Confirm Removal
+                {isRejectingBoy ? (
+                  <>
+                    <Loader2 size={14} className="animate-spin" />
+                    <span>Notifying Bot...</span>
+                  </>
+                ) : (
+                  <span>Confirm Removal</span>
+                )}
               </button>
             </div>
           </div>

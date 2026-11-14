@@ -201,6 +201,21 @@ export default function Home() {
         status: 'pending',
         createdAt: serverTimestamp(),
       });
+
+      fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_action: 'web_new_booking',
+          bookingRef: generatedRef,
+          dateBoyId: selectedBoy.id,
+          dateBoyCode: selectedBoy.boyCode,
+          dateBoyName: selectedBoy.name || '',
+          dateBoyCity: selectedBoy.city || '',
+          dateBoyTownship: selectedBoy.township || '',
+          ...bookingForm,
+        }),
+      }).catch((e) => console.error('Admin booking notification error:', e));
     } catch (err) {
       console.warn('Reservation saved locally:', err);
     } finally {

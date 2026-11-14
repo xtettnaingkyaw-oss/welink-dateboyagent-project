@@ -150,7 +150,7 @@ export default function Register() {
         }
       }
 
-      await addDoc(collection(db, 'dateboys'), {
+      const docRef = await addDoc(collection(db, 'dateboys'), {
         ...formData,
         city: finalCity,
         township: finalTownship,
@@ -160,6 +160,24 @@ export default function Register() {
         status: 'pending',
         createdAt: serverTimestamp(),
       });
+
+      fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_action: 'web_new_registration',
+          boyId: docRef.id,
+          name: formData.name,
+          age: formData.age,
+          height: formData.height,
+          cockSize: formData.cockSize,
+          phone: formData.phone,
+          city: finalCity,
+          township: finalTownship,
+          address: formData.address,
+        }),
+      }).catch((e) => console.error('Admin bot notification error:', e));
+
       setIsSuccess(true);
     } catch (error) {
       console.error('Submission error:', error);

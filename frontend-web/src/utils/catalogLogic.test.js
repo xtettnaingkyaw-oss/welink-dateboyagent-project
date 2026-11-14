@@ -7,6 +7,11 @@ import {
   filterAndSortCompanions,
   validateRegistrationForm,
   formatBookingSummary,
+  extractTimestampMs,
+  toLocalDateKey,
+  formatCompanionDateBadge,
+  computeAdminDateCounts,
+  filterAndSortAdminCompanions,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -35,6 +40,12 @@ test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URL
   assert.equal(
     resolveMediaUrl('', 'BAACAgUAAxkBAA_VID', 'video'),
     '/api/webhook?file_id=BAACAgUAAxkBAA_VID&type=video'
+  );
+
+  // 6. Base64 data: URL takes priority for instant zero-latency rendering
+  assert.equal(
+    resolveMediaUrl('data:image/jpeg;base64,/9j/4AAQ', 'AgACAgUAAxkBAA'),
+    'data:image/jpeg;base64,/9j/4AAQ'
   );
 });
 
@@ -162,3 +173,84 @@ test('formatBookingSummary outputs clean structured reservation details', () => 
   assert.match(summary, /Companion: Julian \(WLDB-ABCDE\)/);
   assert.match(summary, /Schedule: 2026-12-01 at 19:30/);
 });
+
+test('filterAndSortAdminCompanions sorts newest first (fixing alphabetical Firestore ID burial) and filters by Today, Yesterday, Custom Date, and Search', () => {
+  const now = new Date(2026, 10, 14, 2, 0, 0).getTime(); // Nov 14, 2026 02:00 AM local
+  const todaySubmission = new Date(2026, 10, 14, 1, 27, 0).getTime(); // Nov 14, 2026 01:27 AM local
+  const yesterdaySubmission = new Date(2026, 10, 13, 18, 45, 0).getTime(); // Nov 13, 2026 06:45 PM local
+  const olderSubmission = new Date(2026, 10, 5, 14, 15, 0).getTime(); // Nov 05, 2026 02:15 PM local
+
+  // Notice that the newest boy has ID starting with 'z9999' which Firestore's default alphabetical ID sort puts at the bottom!
+  const rawPendingBoys = [
+    {
+      id: 'bi4pg111',
+      name: 'Than Htike Zaw',
+      phone: '09680865145',
+      city: 'ရန်ကုန်',
+      township: 'ဗိုလ်တထောင်မြို့နယ်',
+      createdAt: { seconds: Math.floor(olderSubmission / 1000), nanoseconds: 0 },
+    },
+    {
+      id: 'byr6d222',
+      name: 'shine htet aung',
+      phone: '09986578911',
+      city: 'ရန်ကုန်မြို့',
+      township: 'သာကေတမြို့နယ်',
+      createdAt: { toMillis: () => yesterdaySubmission },
+    },
+    {
+      id: 'z9999new',
+      name: 'New Telegram Applicant',
+      phone: '09777888999',
+      city: 'မန္တလေး',
+      township: 'ချမ်းအေးသာစံ',
+      createdAt: { seconds: Math.floor(todaySubmission / 1000), nanoseconds: 0 },
+    },
+  ];
+
+  // 1. Default 'all' sort puts newest submission ('z9999new') at #1!
+  const allSorted = filterAndSortAdminCompanions(rawPendingBoys, { dateFilter: 'all' }, now);
+  assert.equal(allSorted.length, 3);
+  assert.equal(allSorted[0].id, 'z9999new');
+  assert.equal(allSorted[1].id, 'byr6d222');
+  assert.equal(allSorted[2].id, 'bi4pg111');
+
+  // 2. Date counts
+  const counts = computeAdminDateCounts(rawPendingBoys, now);
+  assert.deepEqual(counts, { all: 3, today: 1, yesterday: 1 });
+
+  // 3. Today filter ('today')
+  const todayList = filterAndSortAdminCompanions(rawPendingBoys, { dateFilter: 'today' }, now);
+  assert.equal(todayList.length, 1);
+  assert.equal(todayList[0].id, 'z9999new');
+
+  // 4. Yesterday filter ('yesterday')
+  const yesterdayList = filterAndSortAdminCompanions(rawPendingBoys, { dateFilter: 'yesterday' }, now);
+  assert.equal(yesterdayList.length, 1);
+  assert.equal(yesterdayList[0].id, 'byr6d222');
+
+  // 5. Custom Date filter ('custom' -> '2026-11-05')
+  const customKey = toLocalDateKey(olderSubmission);
+  const customList = filterAndSortAdminCompanions(
+    rawPendingBoys,
+    { dateFilter: 'custom', customDate: customKey },
+    now
+  );
+  assert.equal(customList.length, 1);
+  assert.equal(customList[0].id, 'bi4pg111');
+
+  // 6. Search by Code WLDB-Z9999 or phone
+  const bySearch = filterAndSortAdminCompanions(
+    rawPendingBoys,
+    { dateFilter: 'all', searchQuery: 'WLDB-Z9999' },
+    now
+  );
+  assert.equal(bySearch.length, 1);
+  assert.equal(bySearch[0].name, 'New Telegram Applicant');
+
+  // 7. Formatted date badge
+  const badgeToday = formatCompanionDateBadge(rawPendingBoys[2], now);
+  assert.match(badgeToday, /ယနေ့ \(Today\)/);
+  assert.equal(extractTimestampMs(rawPendingBoys[1].createdAt), yesterdaySubmission);
+});
+
