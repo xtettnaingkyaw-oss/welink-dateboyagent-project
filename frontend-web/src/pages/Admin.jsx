@@ -58,6 +58,10 @@ import {
   computeAdminDateCounts,
   filterAndSortAdminCompanions,
   toLocalDateKey,
+  extractCompanionChatId,
+  resolveSafeTelegramLink,
+  filterBulkMessageRecipients,
+  formatBulkMessageForRecipient,
 } from '../utils/catalogLogic';
 
 const DateBoyCard = ({
@@ -119,8 +123,7 @@ const DateBoyCard = ({
   const hasLegacyLinks = isLegacyExpiredProneTelegramMedia(boy) || brokenImgDetected;
   const dateBadgeText = formatCompanionDateBadge(boy);
   const isTodaySubmission = dateBadgeText.startsWith('ယနေ့');
-  const tgChatHref =
-    boy.telegramProfileLink || (boy.telegramChatId ? `tg://user?id=${boy.telegramChatId}` : '');
+  const tgChatHref = resolveSafeTelegramLink(boy);
 
   return (
     <div
@@ -595,6 +598,20 @@ export default function Admin() {
   const [adminSearchQuery, setAdminSearchQuery] = useState('');
   const [adminSortOrder, setAdminSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
+  // Bulk Message (Telegram Bot Broadcast) State
+  const [bulkTargetMode, setBulkTargetMode] = useState('all'); // 'all' | 'location' | 'selected'
+  const [bulkStatusFilter, setBulkStatusFilter] = useState('all'); // 'all' | 'approved' | 'pending'
+  const [bulkCity, setBulkCity] = useState('');
+  const [bulkTownship, setBulkTownship] = useState('');
+  const [bulkSearchQuery, setBulkSearchQuery] = useState('');
+  const [bulkSelectedIds, setBulkSelectedIds] = useState([]);
+  const [bulkHeader, setBulkHeader] = useState('WE LINK Admin အသိပေးချက်');
+  const [bulkMessageText, setBulkMessageText] = useState('');
+  const [bulkIncludeMainMenu, setBulkIncludeMainMenu] = useState(true);
+  const [bulkSetReuploadStep, setBulkSetReuploadStep] = useState(false);
+  const [isSendingBulk, setIsSendingBulk] = useState(false);
+  const [bulkResult, setBulkResult] = useState(null);
+
   const [appConfig, setAppConfig] = useState({
     paymentInfo: '',
     privFee: 0,
@@ -784,6 +801,116 @@ export default function Admin() {
 
   const uniqueCities = [...new Set(approvedLocations.map((l) => l.city).filter(Boolean))];
   const uniqueTownships = [...new Set(approvedLocations.map((l) => l.township).filter(Boolean))];
+
+  // Bulk Message Computed Recipients & Jurisdictions (Only Date Boys with a valid Telegram Chat ID)
+  const boysWithChatId = boys.filter((b) => Boolean(extractCompanionChatId(b)));
+  const bulkCities = [
+    ...new Set(boysWithChatId.map((b) => String(b.city || '').trim()).filter(Boolean)),
+  ].sort();
+  const bulkTownships = [
+    ...new Set(
+      boysWithChatId
+        .filter((b) => !bulkCity || String(b.city || '').trim() === bulkCity)
+        .map((b) => String(b.township || '').trim())
+        .filter(Boolean)
+    ),
+  ].sort();
+
+  // Checklist candidates for 'selected' mode (filtered by status and search query)
+  const bulkChecklistCandidates = filterBulkMessageRecipients(boys, {
+    targetMode: 'all',
+    statusFilter: bulkStatusFilter,
+    searchQuery: bulkSearchQuery,
+  });
+
+  // Final recipients that will receive the broadcast
+  const bulkRecipients = filterBulkMessageRecipients(boys, {
+    targetMode: bulkTargetMode,
+    statusFilter: bulkTargetMode === 'selected' ? 'all' : bulkStatusFilter,
+    selectedCity: bulkCity,
+    selectedTownship: bulkTownship,
+    searchQuery: bulkTargetMode === 'selected' ? '' : bulkSearchQuery,
+    selectedIds: bulkSelectedIds,
+  });
+
+  const toggleBulkSelectBoy = (boyId) => {
+    setBulkSelectedIds((prev) =>
+      prev.includes(boyId) ? prev.filter((id) => id !== boyId) : [...prev, boyId]
+    );
+  };
+
+  const selectAllVisibleBulkBoys = () => {
+    const visibleIds = bulkChecklistCandidates.map((b) => b.id);
+    setBulkSelectedIds((prev) => [...new Set([...prev, ...visibleIds])]);
+  };
+
+  const clearBulkSelection = () => {
+    setBulkSelectedIds([]);
+  };
+
+  const handleSendBulkMessage = async (e) => {
+    e.preventDefault();
+    if (isSendingBulk) return;
+    if (!bulkMessageText.trim()) {
+      showToast('ကျေးဇူးပြု၍ ပေးပို့လိုသော စာသား (Message) ကို ရေးသားပေးပါ။', 'error');
+      return;
+    }
+    if (bulkRecipients.length === 0) {
+      showToast('ပေးပို့မည့် Date Boy အနည်းဆုံး (၁) ဦး ရှိရန် လိုအပ်ပါသည်။', 'error');
+      return;
+    }
+
+    setIsSendingBulk(true);
+    setBulkResult(null);
+
+    const targetSummary =
+      bulkTargetMode === 'all'
+        ? `Date Boy အားလုံး (${bulkStatusFilter === 'all' ? 'All Status' : bulkStatusFilter.toUpperCase()} — ${bulkRecipients.length} ဦး)`
+        : bulkTargetMode === 'location'
+          ? `မြို့နယ်အလိုက် (${bulkCity || 'မြို့အားလုံး'}${bulkTownship ? ` · ${bulkTownship}` : ''} — ${bulkRecipients.length} ဦး)`
+          : `ရွေးချယ်ထားသော Date Boy များ (${bulkRecipients.length} ဦး)`;
+
+    try {
+      const payloadRecipients = bulkRecipients.map((b) => ({
+        id: b.id,
+        boyCode: `WLDB-${String(b.id || '').substring(0, 5).toUpperCase()}`,
+        name: b.name || 'Date Boy',
+        city: b.city || '-',
+        township: b.township || '-',
+        chatId: extractCompanionChatId(b),
+      }));
+
+      const res = await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_action: 'bulk_message_dateboys',
+          recipients: payloadRecipients,
+          messageHeader: bulkHeader.trim(),
+          messageText: bulkMessageText.trim(),
+          includeMainMenu: bulkIncludeMainMenu,
+          setReuploadStep: bulkSetReuploadStep,
+          adminUsername: loggedInAdmin?.username || 'Web Admin',
+          targetSummary,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || data.error) {
+        throw new Error(data.error || 'Bulk message request failed');
+      }
+
+      setBulkResult(data);
+      showToast(
+        `📢 Date Boy (${data.sentCount}/${data.totalCount}) ဦးထံသို့ Bulk Message တပြိုင်နက်တည်း ပေးပို့ပြီးပါပြီ! Admin Bot တွင်လည်း အစီရင်ခံစာ ပို့ထားပါသည်။`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Bulk message error:', err);
+      showToast(`⚠️ Bulk Message ပေးပို့ရာတွင် အခက်အခဲဖြစ်ပေါ်နေပါသည်: ${err.message}`, 'error');
+    } finally {
+      setIsSendingBulk(false);
+    }
+  };
 
   const handleApprove = async (id) => {
     const boy = boys.find((b) => b.id === id);
@@ -1334,6 +1461,12 @@ export default function Admin() {
             count={approvedBoys.length}
           />
           <TabButton
+            tab="bulk_message"
+            icon={Send}
+            label="Bulk Message (Bot)"
+            count={boysWithChatId.length}
+          />
+          <TabButton
             tab="bookings"
             icon={Calendar}
             label="Web Reservations"
@@ -1646,6 +1779,550 @@ export default function Admin() {
                   ))}
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'bulk_message' && (
+            <div className="space-y-6">
+              <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 border-b border-[#E6DFD3] pb-5">
+                <div>
+                  <p className="font-mono text-xs tracking-[0.18em] text-[#9E7B36] font-semibold mb-1">
+                    TELEGRAM BOT BROADCAST CONSOLE · SIMULTANEOUS DELIVERY
+                  </p>
+                  <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E]">
+                    Date Boy များထံသို့ တပြိုင်နက်တည်း Bulk Message ပေးပို့ရန်
+                  </h2>
+                </div>
+                <div className="flex items-center gap-3 bg-white px-4 py-2.5 rounded-xl border border-[#E6DFD3] text-xs font-mono tabular-nums">
+                  <span className="text-[#6E675F]">Bot Chat ID ရရှိထားသူ စုစုပေါင်း:</span>
+                  <span className="font-bold text-[#0C0D0E] bg-amber-400/25 px-2.5 py-0.5 rounded-md border border-amber-400/50">
+                    {boysWithChatId.length} ဦး
+                  </span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 xl:grid-cols-12 gap-8 items-start">
+                {/* Left Column: 01. Target Audience Selection */}
+                <div className="xl:col-span-5 bg-white p-6 sm:p-7 rounded-2xl border border-[#E6DFD3] shadow-sm space-y-6">
+                  <div className="border-b border-[#EFECE6] pb-3.5">
+                    <h3 className="font-serif text-xl font-semibold text-[#0C0D0E]">
+                      01. ပေးပို့မည့် Date Boy အုပ်စု ရွေးချယ်ရန်
+                    </h3>
+                    <p className="text-xs text-[#6E675F] mt-0.5">
+                      Date Boy အားလုံး၊ မြို့နယ်အလိုက် သို့မဟုတ် စိတ်ကြိုက်ရွေးချယ်ထားသူများသို့ ပေးပို့နိုင်ပါသည်။
+                    </p>
+                  </div>
+
+                  {/* 3 Target Mode Selector Cards */}
+                  <div className="grid grid-cols-1 gap-2.5">
+                    {[
+                      {
+                        id: 'all',
+                        title: '🌐 Date Boy အားလုံးသို့ (All Date Boys)',
+                        desc: 'Chat Bot ဖြင့် လျှောက်ထားသည့် Chat ID ရှိသူ အားလုံးထံ တပြိုင်နက် ပို့မည်',
+                      },
+                      {
+                        id: 'location',
+                        title: '📍 မြို့ နှင့် မြို့နယ်အလိုက် (By City / Township)',
+                        desc: 'ရွေးချယ်ထားသော မြို့ သို့မဟုတ် မြို့နယ်ရှိ Date Boy များထံသို့သာ သီးသန့်ပို့မည်',
+                      },
+                      {
+                        id: 'selected',
+                        title: '✅ ရွေးချယ်ထားသော Date Boy များသို့ (Custom Select)',
+                        desc: 'စာရင်းထဲမှ မိမိပို့လိုသော Date Boy တစ်ဦးချင်းစီကို အမှန်ခြစ် ရွေးချယ်ပို့မည်',
+                      },
+                    ].map((mode) => {
+                      const active = bulkTargetMode === mode.id;
+                      return (
+                        <button
+                          key={mode.id}
+                          type="button"
+                          onClick={() => setBulkTargetMode(mode.id)}
+                          className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer ${
+                            active
+                              ? 'bg-[#0C0D0E] text-[#FAF8F5] border-[#0C0D0E] shadow-sm'
+                              : 'bg-[#FAF8F5] text-[#0C0D0E] border-[#E6DFD3] hover:bg-[#F5EFE6]'
+                          }`}
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="font-semibold text-xs sm:text-sm">{mode.title}</span>
+                            <span
+                              className={`w-4 h-4 rounded-full border flex items-center justify-center shrink-0 ${
+                                active ? 'border-amber-400 bg-amber-400 text-slate-950' : 'border-[#787167]'
+                              }`}
+                            >
+                              {active && <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />}
+                            </span>
+                          </div>
+                          <p
+                            className={`text-[11px] mt-1 leading-relaxed ${
+                              active ? 'text-slate-300' : 'text-[#6E675F]'
+                            }`}
+                          >
+                            {mode.desc}
+                          </p>
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Status Filter (All / Approved / Pending) */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#0C0D0E]">
+                      Status အလိုက် စစ်ထုတ်ရန်:
+                    </label>
+                    <div className="grid grid-cols-3 gap-2">
+                      {[
+                        { id: 'all', label: 'အားလုံး (All)' },
+                        { id: 'approved', label: 'Approved သီးသန့်' },
+                        { id: 'pending', label: 'Pending သီးသန့်' },
+                      ].map((st) => (
+                        <button
+                          key={st.id}
+                          type="button"
+                          onClick={() => setBulkStatusFilter(st.id)}
+                          className={`py-2 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                            bulkStatusFilter === st.id
+                              ? 'bg-[#F5EFE6] border-[#C5A059] text-[#0C0D0E]'
+                              : 'bg-[#FAF8F5] border-[#E6DFD3] text-[#6E675F] hover:text-[#0C0D0E]'
+                          }`}
+                        >
+                          {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Location Selectors when bulkTargetMode === 'location' */}
+                  {bulkTargetMode === 'location' && (
+                    <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#C5A059] space-y-3">
+                      <div>
+                        <label
+                          htmlFor="bulk-city-select"
+                          className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                        >
+                          မြို့ ရွေးချယ်ရန် (City)
+                        </label>
+                        <select
+                          id="bulk-city-select"
+                          value={bulkCity}
+                          onChange={(e) => {
+                            setBulkCity(e.target.value);
+                            setBulkTownship('');
+                          }}
+                          className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-xs font-semibold text-[#0C0D0E] outline-none cursor-pointer"
+                        >
+                          <option value="">မြို့ အားလုံး (All Cities)</option>
+                          {bulkCities.map((c) => (
+                            <option key={c} value={c}>
+                              {c}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label
+                          htmlFor="bulk-township-select"
+                          className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                        >
+                          မြို့နယ် ရွေးချယ်ရန် (Township)
+                        </label>
+                        <select
+                          id="bulk-township-select"
+                          value={bulkTownship}
+                          onChange={(e) => setBulkTownship(e.target.value)}
+                          className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-xs font-semibold text-[#0C0D0E] outline-none cursor-pointer"
+                        >
+                          <option value="">မြို့နယ် အားလုံး (All Townships)</option>
+                          {bulkTownships.map((t) => (
+                            <option key={t} value={t}>
+                              {t}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Search & Recipient Checklist / Preview */}
+                  <div className="space-y-3 pt-2 border-t border-[#EFECE6]">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="text-xs font-semibold text-[#0C0D0E] tabular-nums">
+                        {bulkTargetMode === 'selected'
+                          ? `ရွေးချယ်ထားသူ (${bulkSelectedIds.length} ဦး)`
+                          : `ပေးပို့မည့် စာရင်းဝင် (${bulkRecipients.length} ဦး)`}
+                      </span>
+
+                      {bulkTargetMode === 'selected' ? (
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={selectAllVisibleBulkBoys}
+                            className="text-[11px] font-semibold text-emerald-700 hover:underline cursor-pointer"
+                          >
+                            အားလုံးရွေးမည်
+                          </button>
+                          <span className="text-slate-300">|</span>
+                          <button
+                            type="button"
+                            onClick={clearBulkSelection}
+                            className="text-[11px] font-semibold text-rose-700 hover:underline cursor-pointer"
+                          >
+                            အားလုံးဖြုတ်မည်
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setBulkSelectedIds(bulkRecipients.map((b) => b.id));
+                            setBulkTargetMode('selected');
+                          }}
+                          className="text-[11px] font-semibold text-[#9E7B36] hover:underline cursor-pointer"
+                        >
+                          တစ်ဦးချင်း ရွေးချယ်မည် →
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="relative">
+                      <Search
+                        size={14}
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-[#787167]"
+                      />
+                      <input
+                        type="text"
+                        value={bulkSearchQuery}
+                        onChange={(e) => setBulkSearchQuery(e.target.value)}
+                        placeholder="အမည်, WLDB-Code, ဖုန်း, မြို့နယ် ဖြင့်ရှာရန်..."
+                        className="w-full pl-9 pr-8 py-2.5 bg-[#FAF8F5] border border-[#E6DFD3] rounded-xl text-xs text-[#0C0D0E] outline-none focus:bg-white focus:border-[#0C0D0E]"
+                      />
+                      {bulkSearchQuery && (
+                        <button
+                          type="button"
+                          onClick={() => setBulkSearchQuery('')}
+                          className="absolute right-2.5 top-1/2 -translate-y-1/2 text-[#787167] hover:text-[#0C0D0E]"
+                        >
+                          <X size={13} />
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="max-h-[340px] overflow-y-auto space-y-1.5 pr-1">
+                      {(bulkTargetMode === 'selected' ? bulkChecklistCandidates : bulkRecipients)
+                        .length === 0 ? (
+                        <div className="p-6 text-center bg-[#FAF8F5] rounded-xl border border-[#E6DFD3] text-xs text-[#6E675F]">
+                          ကိုက်ညီသော Chat ID ရှိသည့် Date Boy မတွေ့ရှိပါ။
+                        </div>
+                      ) : (
+                        (bulkTargetMode === 'selected'
+                          ? bulkChecklistCandidates
+                          : bulkRecipients
+                        ).map((b) => {
+                          const code = `WLDB-${String(b.id || '').substring(0, 5).toUpperCase()}`;
+                          const isChecked =
+                            bulkTargetMode === 'selected'
+                              ? bulkSelectedIds.includes(b.id)
+                              : true;
+                          return (
+                            <div
+                              key={b.id}
+                              onClick={() => {
+                                if (bulkTargetMode === 'selected') {
+                                  toggleBulkSelectBoy(b.id);
+                                } else {
+                                  // Switching to custom selection with all current except clicked, or toggling
+                                  const nextIds = bulkRecipients
+                                    .filter((item) => item.id !== b.id)
+                                    .map((item) => item.id);
+                                  setBulkSelectedIds(nextIds);
+                                  setBulkTargetMode('selected');
+                                }
+                              }}
+                              className={`flex items-center justify-between gap-3 p-2.5 rounded-xl border text-xs cursor-pointer transition-colors ${
+                                isChecked
+                                  ? 'bg-[#FAF8F5] border-[#C5A059] text-[#0C0D0E]'
+                                  : 'bg-white border-[#E6DFD3] text-[#787167] opacity-75 hover:opacity-100'
+                              }`}
+                            >
+                              <div className="flex items-center gap-2.5 min-w-0">
+                                <input
+                                  type="checkbox"
+                                  checked={isChecked}
+                                  onChange={() => {}}
+                                  className="accent-[#0C0D0E] w-4 h-4 rounded cursor-pointer shrink-0"
+                                />
+                                <div className="truncate">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="font-mono font-bold text-[11px] text-[#9E7B36]">
+                                      {code}
+                                    </span>
+                                    <span className="font-semibold text-[#0C0D0E] truncate">
+                                      {b.name}
+                                    </span>
+                                  </div>
+                                  <p className="text-[11px] text-[#6E675F] truncate">
+                                    {b.township}, {b.city} · {b.phone || '-'}
+                                  </p>
+                                </div>
+                              </div>
+                              <span
+                                className={`px-2 py-0.5 rounded font-mono text-[10px] font-semibold uppercase shrink-0 ${
+                                  b.status === 'approved'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                }`}
+                              >
+                                {b.status}
+                              </span>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: 02. Message Composer & Simultaneous Broadcast */}
+                <div className="xl:col-span-7 bg-white p-6 sm:p-8 rounded-2xl border border-[#E6DFD3] shadow-sm space-y-6">
+                  <div className="border-b border-[#EFECE6] pb-3.5">
+                    <h3 className="font-serif text-xl font-semibold text-[#0C0D0E]">
+                      02. ပေးပို့မည့် အကြောင်းအရာ ရေးသားရန် (Message Composer)
+                    </h3>
+                    <p className="text-xs text-[#6E675F] mt-0.5">
+                      အသင့်သုံး ပုံစံများကို ရွေးချယ်နိုင်သလို စိတ်ကြိုက်စာသား ရေးသား၍လည်း တပြိုင်နက်တည်း ပေးပို့နိုင်ပါသည်။
+                    </p>
+                  </div>
+
+                  {/* Quick Templates */}
+                  <div className="space-y-2">
+                    <span className="block text-xs font-semibold text-[#0C0D0E]">
+                      အသင့်သုံး စာသားပုံစံများ (Quick Templates — နှိပ်၍ အသုံးပြုရန်):
+                    </span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      {[
+                        {
+                          label: '📢 အရေးကြီး အသိပေးချက်',
+                          header: 'WE LINK Admin အရေးကြီး အသိပေးချက်',
+                          reupload: false,
+                          text: 'မင်္ဂလာပါ {name} ({code}) ခင်ဗျာ။\n\nWE LINK Dating Agency မှ အရေးကြီး အသိပေးအကြောင်းကြားအပ်ပါသည်။ လက်ရှိ {city} ({township}) အတွင်း အလုပ်ချိတ်ဆက်မှုများ အဆင်ပြေစေရန် သင်၏ Telegram အကောင့်နှင့် ဖုန်းနံပါတ်အား အမြဲဆက်သွယ်နိုင်အောင် ဖွင့်ထားပေးပါရန် မေတ္တာရပ်ခံအပ်ပါသည်။',
+                        },
+                        {
+                          label: '📸 ပုံနှင့် Video အသစ်ပြန်ပို့ရန်',
+                          header: 'WE LINK Admin — ပုံနှင့် Video အသစ်ပြန်ပို့ရန် အသိပေးချက်',
+                          reupload: true,
+                          text: 'မင်္ဂလာပါ {name} ({code}) ခင်ဗျာ။\n\nသင်၏ Date Boy လျှောက်လွှာမှ ဓာတ်ပုံနှင့် Video များကို စနစ်အသစ်သို့ ပြောင်းလဲသိမ်းဆည်းရန် လိုအပ်ပါသဖြင့် ကျေးဇူးပြု၍ မျက်နှာသေချာမြင်ရသည့် အလှဓာတ်ပုံ (၃) ပုံ ကို ယခု Chat တွင် တစ်ပုံချင်း ပြန်လည်ပေးပို့ပေးပါ ခင်ဗျာ။\n\n(ကိုယ်ရေးအချက်အလက်များ ထပ်မံဖြည့်သွင်းရန် မလိုအပ်ပါ — ပထမဆုံး အလှဓာတ်ပုံ ၁ ပုံကို ယခု စတင်ပို့ပေးနိုင်ပါသည်)',
+                        },
+                        {
+                          label: '💼 မြို့နယ်အလိုက် အလုပ်ချိတ်ဆက်မှု',
+                          header: 'WE LINK VIP Concierge — အလုပ်ချိတ်ဆက်မှု အသိပေးချက်',
+                          reupload: false,
+                          text: 'မင်္ဂလာပါ {name} ({code}) ခင်ဗျာ။\n\n{city} — {township} အတွက် VIP ဧည့်သည် ချိတ်ဆက်မှုများ ရှိပါသဖြင့် လက်ရှိ အားလပ်မှု ရှိ/မရှိ Admin ထံသို့ ပြန်လည်အကြောင်းကြားပေးပါ ခင်ဗျာ။',
+                        },
+                        {
+                          label: '⚖️ စည်းကမ်းချက် သတိပေးချက်',
+                          header: 'WE LINK Agency စည်းမျဉ်းစည်းကမ်း သတိပေးချက်',
+                          reupload: false,
+                          text: 'မင်္ဂလာပါ {name} ({code}) ခင်ဗျာ။\n\nWE LINK ၏ Date Boy များအနေဖြင့် ဧည့်သည်များ၏ Privacy ကို အထူးလေးစားလိုက်နာရန်နှင့် ချိန်းဆိုထားသော အချိန်အတိအကျ ရောက်ရှိပေးရန် ထပ်မံသတိပေးအပ်ပါသည်။',
+                        },
+                      ].map((tpl, idx) => (
+                        <button
+                          key={idx}
+                          type="button"
+                          onClick={() => {
+                            setBulkHeader(tpl.header);
+                            setBulkMessageText(tpl.text);
+                            setBulkSetReuploadStep(tpl.reupload);
+                          }}
+                          className="text-left px-3.5 py-2.5 rounded-xl bg-[#FAF8F5] hover:bg-[#F5EFE6] border border-[#E6DFD3] hover:border-[#C5A059] text-xs font-semibold text-[#0C0D0E] transition-colors cursor-pointer"
+                        >
+                          {tpl.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <form onSubmit={handleSendBulkMessage} className="space-y-4">
+                    <div>
+                      <label
+                        htmlFor="bulk-header-input"
+                        className="block text-xs font-semibold text-[#0C0D0E] mb-1.5"
+                      >
+                        ခေါင်းစဉ် (Message Header)
+                      </label>
+                      <input
+                        id="bulk-header-input"
+                        type="text"
+                        value={bulkHeader}
+                        onChange={(e) => setBulkHeader(e.target.value)}
+                        placeholder="ဥပမာ — WE LINK Admin အသိပေးချက်"
+                        className="w-full p-3 bg-[#FAF8F5] border border-[#E6DFD3] rounded-xl text-xs sm:text-sm font-semibold text-[#0C0D0E] outline-none focus:bg-white focus:border-[#0C0D0E]"
+                      />
+                    </div>
+
+                    <div>
+                      <div className="flex flex-wrap items-center justify-between gap-2 mb-1.5">
+                        <label
+                          htmlFor="bulk-body-textarea"
+                          className="text-xs font-semibold text-[#0C0D0E]"
+                        >
+                          ပေးပို့မည့် စာသား (Message Content) *
+                        </label>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          {[
+                            { tag: '{name}', label: '+ အမည် {name}' },
+                            { tag: '{code}', label: '+ ID {code}' },
+                            { tag: '{city}', label: '+ မြို့ {city}' },
+                            { tag: '{township}', label: '+ မြို့နယ် {township}' },
+                          ].map((chip) => (
+                            <button
+                              key={chip.tag}
+                              type="button"
+                              onClick={() =>
+                                setBulkMessageText((prev) => `${prev}${prev ? ' ' : ''}${chip.tag}`)
+                              }
+                              className="px-2 py-0.5 rounded bg-[#F5EFE6] hover:bg-[#E6DFD3] text-[#9E7B36] font-mono text-[11px] font-semibold border border-[#E6DFD3] cursor-pointer"
+                            >
+                              {chip.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <textarea
+                        id="bulk-body-textarea"
+                        rows={6}
+                        value={bulkMessageText}
+                        onChange={(e) => setBulkMessageText(e.target.value)}
+                        placeholder="Date Boy များထံ ပေးပို့လိုသော အကြောင်းအရာကို ရေးသားပါ... ({name}, {code}, {city}, {township} တို့ကို ထည့်သွင်းရေးသားပါက Date Boy တစ်ဦးချင်းစီ၏ အချက်အလက်ဖြင့် အလိုအလျောက် အစားထိုးပို့ပေးပါမည်)"
+                        className="w-full p-4 bg-[#FAF8F5] border border-[#E6DFD3] rounded-xl text-xs sm:text-sm text-[#0C0D0E] outline-none focus:bg-white focus:border-[#0C0D0E] leading-relaxed"
+                        required
+                      />
+                    </div>
+
+                    {/* Delivery Options */}
+                    <div className="p-4 rounded-xl bg-[#FAF8F5] border border-[#E6DFD3] space-y-2.5 text-xs">
+                      <label className="flex items-center gap-2.5 cursor-pointer text-[#0C0D0E] font-medium">
+                        <input
+                          type="checkbox"
+                          checked={bulkIncludeMainMenu}
+                          onChange={(e) => setBulkIncludeMainMenu(e.target.checked)}
+                          className="accent-[#0C0D0E] w-4 h-4 rounded cursor-pointer"
+                        />
+                        <span>
+                          Telegram Bot Main Menu ခလုတ်များ တွဲပို့မည် (Include Main Menu Keyboard)
+                        </span>
+                      </label>
+                      <label className="flex items-center gap-2.5 cursor-pointer text-[#0C0D0E] font-medium">
+                        <input
+                          type="checkbox"
+                          checked={bulkSetReuploadStep}
+                          onChange={(e) => setBulkSetReuploadStep(e.target.checked)}
+                          className="accent-[#0C0D0E] w-4 h-4 rounded cursor-pointer"
+                        />
+                        <span>
+                          Date Boy များ စာရရှိသည်နှင့် ပုံအသစ် (၃) ပုံ တိုက်ရိုက်ပြန်ပို့နိုင်ရန် Bot Photo Re-Upload Mode ဖွင့်ပေးမည်
+                        </span>
+                      </label>
+                    </div>
+
+                    {/* Live Telegram Message Preview */}
+                    {bulkMessageText.trim() && (
+                      <div className="p-4 rounded-xl bg-slate-900 text-slate-100 border border-slate-800 space-y-2">
+                        <div className="flex items-center justify-between text-[11px] font-mono text-amber-400">
+                          <span>TELEGRAM BOT MESSAGE PREVIEW</span>
+                          <span>
+                            Sample:{' '}
+                            {bulkRecipients[0]
+                              ? `${bulkRecipients[0].name} (WLDB-${String(bulkRecipients[0].id).substring(0, 5).toUpperCase()})`
+                              : 'Date Boy'}
+                          </span>
+                        </div>
+                        <div className="text-xs leading-relaxed whitespace-pre-wrap text-slate-200 bg-slate-950/80 p-3.5 rounded-lg border border-slate-800">
+                          {formatBulkMessageForRecipient(
+                            bulkMessageText,
+                            bulkRecipients[0] || {
+                              id: 'sample1',
+                              name: 'Aung Kyaw',
+                              city: 'Yangon',
+                              township: 'Bahan',
+                            },
+                            bulkHeader
+                          ).replace(/<\/?b>/g, '')}
+                        </div>
+                      </div>
+                    )}
+
+                    <button
+                      type="submit"
+                      disabled={isSendingBulk || bulkRecipients.length === 0}
+                      className={`w-full py-4 px-6 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center gap-2.5 transition-all select-none shadow-md ${
+                        isSendingBulk
+                          ? 'bg-slate-900 text-amber-300 cursor-wait scale-[0.99]'
+                          : bulkRecipients.length === 0
+                            ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                            : 'welink-brand-gradient hover:opacity-95 active:scale-[0.99] text-slate-950 cursor-pointer'
+                      }`}
+                    >
+                      {isSendingBulk ? (
+                        <>
+                          <Loader2 size={17} className="animate-spin text-amber-400 shrink-0" />
+                          <span>
+                            Date Boy ({bulkRecipients.length}) ဦးထံသို့ Telegram Bot မှ တပြိုင်နက်တည်း ပေးပို့နေပါသည်...
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Send size={16} className="shrink-0" />
+                          <span>
+                            ရွေးချယ်ထားသော Date Boy ({bulkRecipients.length}) ဦးထံသို့ တပြိုင်နက်တည်း Bulk Message ပို့မည်
+                          </span>
+                        </>
+                      )}
+                    </button>
+                  </form>
+
+                  {/* Broadcast Delivery Report Summary */}
+                  {bulkResult && (
+                    <div className="p-5 rounded-2xl bg-emerald-50/90 border border-emerald-200 space-y-4">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2 text-emerald-950 font-semibold text-sm">
+                          <CheckCircle2 size={18} className="text-emerald-600 shrink-0" />
+                          <span>Bulk Message ပေးပို့မှု အစီရင်ခံစာ (Broadcast Complete)</span>
+                        </div>
+                        <span className="font-mono text-xs font-bold text-emerald-800 bg-white px-3 py-1 rounded-lg border border-emerald-200 tabular-nums">
+                          ✅ အောင်မြင် {bulkResult.sentCount} / {bulkResult.totalCount} ဦး
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-3 gap-3 text-center">
+                        <div className="bg-white p-3 rounded-xl border border-emerald-200/80">
+                          <span className="block font-mono text-lg font-bold text-[#0C0D0E] tabular-nums">
+                            {bulkResult.totalCount}
+                          </span>
+                          <span className="text-[11px] text-[#6E675F]">စုစုပေါင်း (Targeted)</span>
+                        </div>
+                        <div className="bg-white p-3 rounded-xl border border-emerald-200/80">
+                          <span className="block font-mono text-lg font-bold text-emerald-600 tabular-nums">
+                            {bulkResult.sentCount}
+                          </span>
+                          <span className="text-[11px] text-[#6E675F]">ပို့ပြီး (Delivered)</span>
+                        </div>
+                        <div className="bg-white p-3 rounded-xl border border-emerald-200/80">
+                          <span className="block font-mono text-lg font-bold text-amber-600 tabular-nums">
+                            {bulkResult.failedCount}
+                          </span>
+                          <span className="text-[11px] text-[#6E675F]">ပို့မရသူ (Failed/Blocked)</span>
+                        </div>
+                      </div>
+
+                      <p className="text-xs text-emerald-900">
+                        🔔 Admin ၏ Telegram Bot သို့လည်း ပေးပို့မှု အစီရင်ခံစာ (Delivery Report) ပေးပို့ထားပြီး ဖြစ်ပါသည်။
+                      </p>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
           )}
 

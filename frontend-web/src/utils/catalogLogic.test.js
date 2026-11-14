@@ -12,6 +12,10 @@ import {
   formatCompanionDateBadge,
   computeAdminDateCounts,
   filterAndSortAdminCompanions,
+  extractCompanionChatId,
+  resolveSafeTelegramLink,
+  filterBulkMessageRecipients,
+  formatBulkMessageForRecipient,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -253,4 +257,87 @@ test('filterAndSortAdminCompanions sorts newest first (fixing alphabetical Fires
   assert.match(badgeToday, /ယနေ့ \(Today\)/);
   assert.equal(extractTimestampMs(rawPendingBoys[1].createdAt), yesterdaySubmission);
 });
+
+test('filterBulkMessageRecipients and formatBulkMessageForRecipient filter by All, Location (City/Township), and Selected Date Boys with Chat IDs', () => {
+  const sampleBoys = [
+    {
+      id: 'boy111',
+      name: 'Aung Kyaw',
+      city: 'Yangon',
+      township: 'Bahan',
+      status: 'approved',
+      telegramChatId: '10001',
+      telegramProfileLink: 'https://t.me/Aung Kyaw', // invalid space in legacy link
+    },
+    {
+      id: 'boy222',
+      name: 'Min Thu',
+      city: 'Yangon',
+      township: 'Sanchaung',
+      status: 'pending',
+      telegramProfileLink: 'tg://user?id=10002', // fallback Chat ID from profile link
+    },
+    {
+      id: 'boy333',
+      name: 'Zin Ko',
+      city: 'Mandalay',
+      township: 'Chanayethazan',
+      status: 'approved',
+      telegramChatId: '10003',
+      telegramProfileLink: 'https://t.me/zinko_vip',
+    },
+    {
+      id: 'boy444_web_only',
+      name: 'Web Only Applicant',
+      city: 'Yangon',
+      township: 'Bahan',
+      status: 'pending',
+      // No telegramChatId -> should be excluded from Bot Bulk Messaging
+    },
+  ];
+
+  // Safe Telegram link fixes space in t.me/Aung Kyaw -> tg://user?id=10001
+  assert.equal(resolveSafeTelegramLink(sampleBoys[0]), 'tg://user?id=10001');
+  assert.equal(resolveSafeTelegramLink(sampleBoys[2]), 'https://t.me/zinko_vip');
+  assert.equal(extractCompanionChatId(sampleBoys[1]), '10002');
+  assert.equal(extractCompanionChatId(sampleBoys[3]), '');
+
+  // 1. Mode 'all' returns all 3 boys with Chat IDs (excluding web-only boy444)
+  const allRecipients = filterBulkMessageRecipients(sampleBoys, { targetMode: 'all' });
+  assert.equal(allRecipients.length, 3);
+
+  // 2. Mode 'all' + statusFilter 'approved' returns 2 boys
+  const approvedOnly = filterBulkMessageRecipients(sampleBoys, {
+    targetMode: 'all',
+    statusFilter: 'approved',
+  });
+  assert.equal(approvedOnly.length, 2);
+
+  // 3. Mode 'location' by City + Township
+  const yangonSanchaung = filterBulkMessageRecipients(sampleBoys, {
+    targetMode: 'location',
+    selectedCity: 'Yangon',
+    selectedTownship: 'Sanchaung',
+  });
+  assert.equal(yangonSanchaung.length, 1);
+  assert.equal(yangonSanchaung[0].id, 'boy222');
+
+  // 4. Mode 'selected' by explicit IDs
+  const customSelected = filterBulkMessageRecipients(sampleBoys, {
+    targetMode: 'selected',
+    selectedIds: ['boy111', 'boy333'],
+  });
+  assert.equal(customSelected.length, 2);
+
+  // 5. Personalized message formatting
+  const msg = formatBulkMessageForRecipient(
+    'မင်္ဂလာပါ {name} ({code})၊ {city} - {township} အတွက် အလုပ်ချိတ်ဆက်မှု ရှိပါသည်။',
+    sampleBoys[0],
+    'WE LINK Admin အသိပေးချက်'
+  );
+  assert.match(msg, /📢 <b>WE LINK Admin အသိပေးချက်<\/b>/);
+  assert.match(msg, /မင်္ဂလာပါ Aung Kyaw \(WLDB-BOY11\)/);
+  assert.match(msg, /Yangon - Bahan/);
+});
+
 

@@ -1165,6 +1165,140 @@ export default async function handler(req, res) {
       });
     }
 
+    // Simultaneous Bulk Message Broadcast from Web Admin Panel to Date Boys via Telegram Bot
+    if (reqBody.internal_action === "bulk_message_dateboys") {
+      const recipients = Array.isArray(reqBody.recipients) ? reqBody.recipients : [];
+      const rawTemplate = String(reqBody.messageText || "").trim();
+      const headerTitle = String(reqBody.messageHeader || "").trim();
+      const includeMainMenu = Boolean(reqBody.includeMainMenu);
+      const setReuploadStep = Boolean(reqBody.setReuploadStep);
+      const adminUsername = String(reqBody.adminUsername || "Web Admin");
+      const targetSummary = String(reqBody.targetSummary || "ရွေးချယ်ထားသော Date Boy များ");
+
+      if (!rawTemplate || recipients.length === 0) {
+        return res.status(400).json({
+          error: "ပေးပို့မည့် စာသား သို့မဟုတ် လက်ခံမည့် Date Boy စာရင်း မပြည့်စုံပါ။",
+        });
+      }
+
+      const results = [];
+      let sentCount = 0;
+      let failedCount = 0;
+
+      // Process in parallel batches of 10 for fast simultaneous delivery without hitting Telegram rate limits
+      const BATCH_SIZE = 10;
+      for (let i = 0; i < recipients.length; i += BATCH_SIZE) {
+        const batch = recipients.slice(i, i + BATCH_SIZE);
+        const batchPromises = batch.map(async (rec) => {
+          const targetChatId = String(rec.chatId || "").trim();
+          const boyId = String(rec.id || "").trim();
+          const boyCode =
+            rec.boyCode || (boyId ? `WLDB-${boyId.substring(0, 5).toUpperCase()}` : "WLDB-XXXXX");
+          const boyName = String(rec.name || "Date Boy").trim();
+          const boyCity = String(rec.city || "-").trim();
+          const boyTownship = String(rec.township || "-").trim();
+
+          if (!targetChatId || targetChatId === "0") {
+            return {
+              id: boyId,
+              boyCode,
+              name: boyName,
+              chatId: targetChatId,
+              ok: false,
+              error: "Missing Chat ID",
+            };
+          }
+
+          // Substitute personalization placeholders safely
+          const personalizedBody = escapeHTML(rawTemplate)
+            .replace(/\{name\}/gi, escapeHTML(boyName))
+            .replace(/\{code\}/gi, escapeHTML(boyCode))
+            .replace(/\{city\}/gi, escapeHTML(boyCity))
+            .replace(/\{township\}/gi, escapeHTML(boyTownship));
+
+          const finalHtml = headerTitle
+            ? `📢 <b>${escapeHTML(headerTitle)}</b>\n\n${personalizedBody}`
+            : personalizedBody;
+
+          if (setReuploadStep && boyId) {
+            try {
+              await setDoc(
+                doc(db, "telegram_states", targetChatId),
+                {
+                  step: "REUPLOAD_PUBLIC_PHOTOS",
+                  data: { targetBoyId: boyId, publicPhotos: [], publicFileIds: [] },
+                },
+                { merge: true }
+              );
+              await updateDoc(doc(db, "dateboys", boyId), {
+                reuploadRequestedAt: serverTimestamp(),
+              }).catch(() => {});
+            } catch (e) {
+              console.error("Failed to set reupload step in bulk message:", e);
+            }
+          }
+
+          const sendRes = await sendMessage(
+            targetChatId,
+            finalHtml,
+            includeMainMenu ? MAIN_MENU_KEYBOARD : null
+          );
+
+          return {
+            id: boyId,
+            boyCode,
+            name: boyName,
+            city: boyCity,
+            township: boyTownship,
+            chatId: targetChatId,
+            ok: Boolean(sendRes?.ok),
+            error: sendRes?.ok ? null : sendRes?.description || sendRes?.error || "Send failed",
+          };
+        });
+
+        const settled = await Promise.all(batchPromises);
+        for (const item of settled) {
+          results.push(item);
+          if (item.ok) sentCount++;
+          else failedCount++;
+        }
+      }
+
+      // Send Broadcast Delivery Summary Notification to Admin's Telegram Bot
+      const adminChatId = await getAdminChatId();
+      let adminNotified = false;
+      if (adminChatId) {
+        const previewSnippet =
+          rawTemplate.length > 220 ? `${rawTemplate.slice(0, 220)}...` : rawTemplate;
+        const sampleNames = results
+          .slice(0, 8)
+          .map((r) => `${r.ok ? "✅" : "⚠️"} ${escapeHTML(r.name)} (${r.boyCode})`)
+          .join("\n");
+        const moreText =
+          results.length > 8 ? `\n<i>...နှင့် အခြား (${results.length - 8}) ဦး</i>` : "";
+
+        const adminReportMsg =
+          `📢 <b>Bulk Message ပေးပို့မှု အစီရင်ခံစာ (Web Admin Broadcast)</b>\n\n` +
+          `🎯 <b>ပေးပို့သည့် အုပ်စု:</b> ${escapeHTML(targetSummary)}\n` +
+          `🛡️ <b>ပေးပို့သူ:</b> ${escapeHTML(adminUsername)}\n` +
+          `📊 <b>စုစုပေါင်း:</b> ${recipients.length} ဦး | ✅ <b>အောင်မြင်:</b> ${sentCount} ဦး | ⚠️ <b>ပို့မရသူ:</b> ${failedCount} ဦး\n\n` +
+          `📝 <b>ပေးပို့ခဲ့သည့် စာသား:</b>\n<i>${escapeHTML(previewSnippet)}</i>\n\n` +
+          `👥 <b>လက်ခံသူ စာရင်း:</b>\n${sampleNames}${moreText}`;
+
+        const admRes = await sendMessage(adminChatId, adminReportMsg);
+        adminNotified = Boolean(admRes?.ok);
+      }
+
+      return res.status(200).json({
+        status: "bulk_completed",
+        totalCount: recipients.length,
+        sentCount,
+        failedCount,
+        adminNotified,
+        results,
+      });
+    }
+
     const { message, callback_query } = reqBody;
     let chatId,
       text = "",
@@ -1176,7 +1310,10 @@ export default async function handler(req, res) {
       chatId = message.chat.id;
       globalChatId = chatId;
       text = message.text ? message.text.trim() : "";
-      username = message.from.username || message.from.first_name;
+      username =
+        message.from?.username && /^[a-zA-Z0-9_]{4,}$/.test(message.from.username)
+          ? message.from.username
+          : null;
 
       let targetFileId = null;
       let compactPhotoFileId = null;
@@ -1211,7 +1348,10 @@ export default async function handler(req, res) {
       chatId = callback_query.message.chat.id;
       globalChatId = chatId;
       text = callback_query.data;
-      username = callback_query.from.username || callback_query.from.first_name;
+      username =
+        callback_query.from?.username && /^[a-zA-Z0-9_]{4,}$/.test(callback_query.from.username)
+          ? callback_query.from.username
+          : null;
     }
 
     if (!chatId) return res.status(200).json({ status: "No chatId" });

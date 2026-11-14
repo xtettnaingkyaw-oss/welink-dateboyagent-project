@@ -544,3 +544,130 @@ export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.no
     });
 }
 
+/**
+ * Extracts a numeric/string Telegram Chat ID from a Date Boy record,
+ * checking `telegramChatId` first and falling back to `tg://user?id=...` in `telegramProfileLink`.
+ */
+export function extractCompanionChatId(boy) {
+  if (!boy || typeof boy !== 'object') return '';
+  if (boy.telegramChatId !== undefined && boy.telegramChatId !== null && String(boy.telegramChatId).trim() !== '' && String(boy.telegramChatId).trim() !== '0') {
+    return String(boy.telegramChatId).trim();
+  }
+  if (typeof boy.telegramProfileLink === 'string') {
+    const match = boy.telegramProfileLink.match(/id=(\d+)/);
+    if (match && match[1]) return match[1];
+  }
+  return '';
+}
+
+/**
+ * Resolves a valid clickable Telegram profile link for a Date Boy.
+ * Fixes legacy records where `first_name` with spaces was accidentally placed after `https://t.me/`.
+ */
+export function resolveSafeTelegramLink(boy) {
+  if (!boy || typeof boy !== 'object') return '';
+  const chatId = extractCompanionChatId(boy);
+  const rawLink = typeof boy.telegramProfileLink === 'string' ? boy.telegramProfileLink.trim() : '';
+
+  if (rawLink.startsWith('tg://user?id=')) {
+    return rawLink;
+  }
+  // Valid Telegram @username link (5+ alphanumeric/underscore characters, no spaces)
+  if (/^https?:\/\/t\.me\/[a-zA-Z0-9_]{4,}$/.test(rawLink)) {
+    return rawLink;
+  }
+  if (chatId) {
+    return `tg://user?id=${chatId}`;
+  }
+  return rawLink;
+}
+
+/**
+ * Filters Date Boys eligible for Telegram Bot Bulk Messaging (must have a valid Telegram Chat ID)
+ * based on mode ('all' | 'location' | 'selected'), statusFilter, city, township, searchQuery, and selectedIds.
+ */
+export function filterBulkMessageRecipients(boys, options = {}) {
+  if (!Array.isArray(boys)) return [];
+  const {
+    targetMode = 'all', // 'all' | 'location' | 'selected'
+    statusFilter = 'all', // 'all' | 'approved' | 'pending' | 'hidden'
+    selectedCity = '',
+    selectedTownship = '',
+    searchQuery = '',
+    selectedIds = [],
+  } = options;
+
+  const cleanSearch = String(searchQuery || '').toLowerCase().trim();
+  const selectedSet = new Set(Array.isArray(selectedIds) ? selectedIds : []);
+
+  // Only include Date Boys who actually have a Telegram Chat ID from the Bot
+  const withChatId = boys.filter((boy) => Boolean(extractCompanionChatId(boy)));
+
+  return withChatId
+    .filter((boy) => {
+      if (statusFilter !== 'all' && boy.status !== statusFilter) {
+        return false;
+      }
+
+      if (targetMode === 'location') {
+        if (selectedCity && String(boy.city || '').trim() !== selectedCity) {
+          return false;
+        }
+        if (selectedTownship && String(boy.township || '').trim() !== selectedTownship) {
+          return false;
+        }
+      } else if (targetMode === 'selected') {
+        if (!selectedSet.has(boy.id)) {
+          return false;
+        }
+      }
+
+      if (cleanSearch && targetMode !== 'selected') {
+        const boyCode = `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`.toLowerCase();
+        const matchName = String(boy.name || '').toLowerCase().includes(cleanSearch);
+        const matchCode = boyCode.includes(cleanSearch) || String(boy.id || '').toLowerCase().includes(cleanSearch);
+        const matchPhone = String(boy.phone || '').toLowerCase().includes(cleanSearch);
+        const matchCity = String(boy.city || '').toLowerCase().includes(cleanSearch);
+        const matchTownship = String(boy.township || '').toLowerCase().includes(cleanSearch);
+        if (!matchName && !matchCode && !matchPhone && !matchCity && !matchTownship) {
+          return false;
+        }
+      }
+
+      return true;
+    })
+    .sort((a, b) => {
+      const timeA = getCompanionTimestampMs(a);
+      const timeB = getCompanionTimestampMs(b);
+      if (timeA !== timeB) return timeB - timeA;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    });
+}
+
+/**
+ * Formats a personalized bulk message for a specific Date Boy by substituting
+ * {name}, {code}, {city}, and {township} placeholders.
+ */
+export function formatBulkMessageForRecipient(templateText, boy, headerTitle = '') {
+  if (!templateText || typeof templateText !== 'string') return '';
+  const id = String(boy?.id || '');
+  const boyCode = boy?.boyCode || (id ? `WLDB-${id.substring(0, 5).toUpperCase()}` : 'WLDB-XXXXX');
+  const name = String(boy?.name || 'Date Boy').trim();
+  const city = String(boy?.city || '-').trim();
+  const township = String(boy?.township || '-').trim();
+
+  const body = templateText
+    .replace(/\{name\}/gi, name)
+    .replace(/\{code\}/gi, boyCode)
+    .replace(/\{city\}/gi, city)
+    .replace(/\{township\}/gi, township)
+    .trim();
+
+  const cleanHeader = String(headerTitle || '').trim();
+  if (cleanHeader) {
+    return `📢 <b>${cleanHeader}</b>\n\n${body}`;
+  }
+  return body;
+}
+
+
