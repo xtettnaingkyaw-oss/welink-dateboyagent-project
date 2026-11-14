@@ -4,6 +4,7 @@ import { ShieldCheck, Lock, Clock, ArrowUpRight } from 'lucide-react';
 import Home from './pages/Home';
 import Register from './pages/Register';
 import Admin from './pages/Admin';
+import PWAInstallButton from './components/PWAInstallButton';
 import { BRAND_LOGO_URL } from './utils/catalogLogic';
 
 function ScrollToTop() {
@@ -22,11 +23,11 @@ function Navigation() {
   // Strict 3-Zone Top Bar Contract with WE LINK Brand Logo & Prismatic Top Accent:
   // Zone 1: Brand Logo + Wordmark (single line)
   // Zone 2: 4 concise single-line navigation links
-  // Zone 3: 1 primary action button
+  // Zone 3: Install App + Primary action button
   return (
     <header className="sticky top-0 z-50 bg-white/95 backdrop-blur-md border-b border-slate-200/90 transition-colors duration-200">
       <div className="h-1 w-full welink-spectrum-bar" />
-      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between gap-8">
+      <div className="max-w-[1440px] mx-auto px-4 sm:px-8 lg:px-12 h-16 sm:h-20 flex items-center justify-between gap-4 sm:gap-8">
         {/* Zone 1: Brand Logo + Wordmark */}
         <Link
           to="/"
@@ -81,19 +82,20 @@ function Navigation() {
           </Link>
         </nav>
 
-        {/* Zone 3: Single Primary Action */}
-        <div className="flex items-center shrink-0">
+        {/* Zone 3: Install App + Primary Action */}
+        <div className="flex items-center gap-2.5 shrink-0">
+          <PWAInstallButton />
           {isRegisterPage ? (
             <Link
               to="/"
-              className="px-5 py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
+              className="px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-semibold tracking-wide text-white bg-slate-900 hover:bg-slate-800 rounded-lg transition-colors whitespace-nowrap shrink-0"
             >
               Browse Directory
             </Link>
           ) : (
             <Link
               to="/register"
-              className="px-5 py-2.5 text-xs sm:text-sm font-bold tracking-wide text-slate-950 welink-brand-gradient hover:opacity-95 rounded-lg shadow-sm transition-opacity whitespace-nowrap shrink-0"
+              className="px-4 sm:px-5 py-2.5 text-xs sm:text-sm font-bold tracking-wide text-slate-950 welink-brand-gradient hover:opacity-95 rounded-lg shadow-sm transition-opacity whitespace-nowrap shrink-0"
             >
               Apply as Companion
             </Link>

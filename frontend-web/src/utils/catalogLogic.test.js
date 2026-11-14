@@ -340,4 +340,33 @@ test('filterBulkMessageRecipients and formatBulkMessageForRecipient filter by Al
   assert.match(msg, /Yangon - Bahan/);
 });
 
+test('PWA manifest and iOS Add to Home Screen icons are valid PNGs and linked in index.html', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const rootDir = path.resolve(import.meta.dirname, '../..');
+
+  const htmlContent = fs.readFileSync(path.join(rootDir, 'index.html'), 'utf8');
+  assert.match(htmlContent, /rel="apple-touch-icon"[^>]*href="\/apple-touch-icon\.png"/);
+  assert.match(htmlContent, /name="apple-mobile-web-app-title" content="WE LINK"/);
+  assert.match(htmlContent, /rel="manifest" href="\/manifest\.webmanifest"/);
+
+  const manifestRaw = fs.readFileSync(path.join(rootDir, 'public/manifest.webmanifest'), 'utf8');
+  const manifest = JSON.parse(manifestRaw);
+  assert.equal(manifest.short_name, 'WE LINK');
+  assert.equal(manifest.display, 'standalone');
+  assert.ok(manifest.icons.some((i) => i.sizes === '180x180' && i.type === 'image/png'));
+  assert.ok(manifest.icons.some((i) => i.sizes === '192x192' && i.type === 'image/png'));
+  assert.ok(manifest.icons.some((i) => i.sizes === '512x512' && i.type === 'image/png'));
+
+  // Verify PNG magic signature (89 50 4E 47 0D 0A 1A 0A) so iOS Safari never rejects the icon
+  for (const file of ['apple-touch-icon.png', 'pwa-192x192.png', 'pwa-512x512.png']) {
+    const buf = fs.readFileSync(path.join(rootDir, 'public', file));
+    assert.equal(buf[0], 0x89, `${file} must have PNG signature byte 0`);
+    assert.equal(buf[1], 0x50, `${file} must have PNG signature byte 1 ('P')`);
+    assert.equal(buf[2], 0x4e, `${file} must have PNG signature byte 2 ('N')`);
+    assert.equal(buf[3], 0x47, `${file} must have PNG signature byte 3 ('G')`);
+  }
+});
+
+
 
