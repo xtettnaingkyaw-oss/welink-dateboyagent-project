@@ -13,6 +13,14 @@ import {
   updateDoc,
   deleteDoc,
 } from "firebase/firestore";
+import {
+  buildUnifiedLocationCatalog,
+  getCitiesFromCatalog,
+  getTownshipsForCity,
+  addUniqueLocationToCatalog,
+  locationExistsInCatalog,
+  paginateLocationItems,
+} from "../src/utils/myanmarLocations.js";
 
 const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY,
@@ -400,6 +408,174 @@ async function sendMessage(chatId, text, replyMarkup = null) {
     console.error("SendMessage Error:", err);
     return { ok: false, error: err.message };
   }
+}
+
+async function editOrSendMessage(chatId, messageId, text, replyMarkup = null) {
+  if (messageId) {
+    try {
+      const body = {
+        chat_id: chatId,
+        message_id: messageId,
+        text,
+        parse_mode: "HTML",
+        disable_web_page_preview: true,
+      };
+      if (replyMarkup) body.reply_markup = replyMarkup;
+      const response = await fetch(`${TELEGRAM_API}/editMessageText`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await response.json();
+      if (data.ok) return data;
+    } catch (err) {
+      console.error("editMessageText fallback to sendMessage:", err);
+    }
+  }
+  return await sendMessage(chatId, text, replyMarkup);
+}
+
+async function answerCallbackQuerySafe(callbackQueryId, text = "") {
+  if (!callbackQueryId) return;
+  try {
+    await fetch(`${TELEGRAM_API}/answerCallbackQuery`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        callback_query_id: callbackQueryId,
+        ...(text ? { text } : {}),
+      }),
+    });
+  } catch (err) {
+    console.error("answerCallbackQuery error:", err);
+  }
+}
+
+/**
+ * Loads the unified, unique Myanmar Cities & Townships master catalog from Firestore
+ * (`settings/myanmar_locations` + approved `locations` docs, falling back to full 330-township master list).
+ */
+async function getActiveLocationCatalog() {
+  try {
+    const [masterSnap, approvedSnap] = await Promise.all([
+      getDoc(doc(db, "settings", "myanmar_locations")),
+      getDocs(query(collection(db, "locations"), where("status", "==", "approved"))),
+    ]);
+    const storedRegions = masterSnap.exists() ? masterSnap.data().regions : null;
+    const approvedDocs = approvedSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+    return buildUnifiedLocationCatalog(storedRegions, approvedDocs);
+  } catch (err) {
+    console.error("getActiveLocationCatalog fallback error:", err);
+    return buildUnifiedLocationCatalog(null, []);
+  }
+}
+
+function buildCityDropdownKeyboard(cities, page = 0) {
+  const pageData = paginateLocationItems(cities, page, 10);
+  const inline_keyboard = [];
+
+  for (let i = 0; i < pageData.items.length; i += 2) {
+    const row = [
+      {
+        text: `🏙️ ${pageData.items[i].label}`,
+        callback_data: `REGCITY_S_${pageData.items[i].index}`,
+      },
+    ];
+    if (pageData.items[i + 1]) {
+      row.push({
+        text: `🏙️ ${pageData.items[i + 1].label}`,
+        callback_data: `REGCITY_S_${pageData.items[i + 1].index}`,
+      });
+    }
+    inline_keyboard.push(row);
+  }
+
+  if (pageData.totalPages > 1) {
+    const navRow = [];
+    if (pageData.hasPrev) {
+      navRow.push({
+        text: `⬅️ ရှေ့စာမျက်နှာ`,
+        callback_data: `REGCITY_P_${pageData.page - 1}`,
+      });
+    }
+    navRow.push({
+      text: `📄 ${pageData.page + 1}/${pageData.totalPages}`,
+      callback_data: `REGCITY_P_${pageData.page}`,
+    });
+    if (pageData.hasNext) {
+      navRow.push({
+        text: `နောက်စာမျက်နှာ ➡️`,
+        callback_data: `REGCITY_P_${pageData.page + 1}`,
+      });
+    }
+    inline_keyboard.push(navRow);
+  }
+
+  inline_keyboard.push([
+    {
+      text: "➕ အခြားမြို့ (List ထဲမရှိပါက Request လုပ်မည်)",
+      callback_data: "REGCITY_OTHER",
+    },
+  ]);
+
+  return { inline_keyboard, pageData };
+}
+
+function buildTownshipDropdownKeyboard(townships, page = 0) {
+  const pageData = paginateLocationItems(townships, page, 12);
+  const inline_keyboard = [];
+
+  for (let i = 0; i < pageData.items.length; i += 2) {
+    const row = [
+      {
+        text: `📍 ${pageData.items[i].label}`,
+        callback_data: `REGTWN_S_${pageData.items[i].index}`,
+      },
+    ];
+    if (pageData.items[i + 1]) {
+      row.push({
+        text: `📍 ${pageData.items[i + 1].label}`,
+        callback_data: `REGTWN_S_${pageData.items[i + 1].index}`,
+      });
+    }
+    inline_keyboard.push(row);
+  }
+
+  if (pageData.totalPages > 1) {
+    const navRow = [];
+    if (pageData.hasPrev) {
+      navRow.push({
+        text: `⬅️ ရှေ့စာမျက်နှာ`,
+        callback_data: `REGTWN_P_${pageData.page - 1}`,
+      });
+    }
+    navRow.push({
+      text: `📄 ${pageData.page + 1}/${pageData.totalPages}`,
+      callback_data: `REGTWN_P_${pageData.page}`,
+    });
+    if (pageData.hasNext) {
+      navRow.push({
+        text: `နောက်စာမျက်နှာ ➡️`,
+        callback_data: `REGTWN_P_${pageData.page + 1}`,
+      });
+    }
+    inline_keyboard.push(navRow);
+  }
+
+  inline_keyboard.push([
+    {
+      text: "➕ အခြားမြို့နယ် (List ထဲမရှိပါက Request လုပ်မည်)",
+      callback_data: "REGTWN_OTHER",
+    },
+  ]);
+  inline_keyboard.push([
+    {
+      text: "⬅️ မြို့ပြန်ရွေးမည်",
+      callback_data: "REGTWN_BACK_CITY",
+    },
+  ]);
+
+  return { inline_keyboard, pageData };
 }
 
 /**
@@ -1007,6 +1183,10 @@ export default async function handler(req, res) {
           boyId: targetBoyId,
           mediaType: "private",
         });
+        const customLocNotice = reqBody.isCustomLocationRequest
+          ? `\n\n📍 <b>မြို့/မြို့နယ်အသစ် Request ပါဝင်ပါသည်:</b> ${escapeHTML(boyData.township)}, ${escapeHTML(boyData.city)}\n<i>(Admin Panel -> Locations Tab တွင် သို့မဟုတ် အောက်ပါခလုတ်ဖြင့် အတည်ပြုနိုင်ပါသည်)</i>`
+          : "";
+
         const adminMsg =
           `🚨 <b>New Date Boy Registration (Website) — ${boyCode}</b> 🚨\n\n` +
           `🆔 <b>Code:</b> ${boyCode}\n` +
@@ -1018,15 +1198,29 @@ export default async function handler(req, res) {
           `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(boyData.address)}\n\n` +
           `📸 <b>Public:</b> ${publicLinks || "Web Admin တွင်ကြည့်ရန်"}\n` +
           `🔒 <b>Private:</b> ${privateLinks || "Web Admin တွင်ကြည့်ရန်"}\n\n` +
-          `🌐 <i>Website (/register) မှ တိုက်ရိုက်လျှောက်ထားသူ ဖြစ်ပါသည်။</i>`;
+          `🌐 <i>Website (/register) မှ တိုက်ရိုက်လျှောက်ထားသူ ဖြစ်ပါသည်။</i>${customLocNotice}`;
+
+        const inlineRows = [
+          [
+            { text: "✅ Approve", callback_data: `APP_D_0_${targetBoyId}` },
+            { text: "❌ Reject", callback_data: `REJ_D_0_${targetBoyId}` },
+          ],
+        ];
+        if (reqBody.locationRequestId) {
+          inlineRows.push([
+            {
+              text: "📍 Approve Location (List ထဲထည့်မည်)",
+              callback_data: `APPLOC_${reqBody.locationRequestId}`,
+            },
+            {
+              text: "🗑️ Reject Location",
+              callback_data: `REJLOC_${reqBody.locationRequestId}`,
+            },
+          ]);
+        }
 
         await sendMessage(adminChatId, adminMsg, {
-          inline_keyboard: [
-            [
-              { text: "✅ Approve", callback_data: `APP_D_0_${targetBoyId}` },
-              { text: "❌ Reject", callback_data: `REJ_D_0_${targetBoyId}` },
-            ],
-          ],
+          inline_keyboard: inlineRows,
         });
       }
       return res.status(200).json({ status: "notified_admin" });
@@ -1352,7 +1546,10 @@ export default async function handler(req, res) {
         callback_query.from?.username && /^[a-zA-Z0-9_]{4,}$/.test(callback_query.from.username)
           ? callback_query.from.username
           : null;
+      await answerCallbackQuerySafe(callback_query.id);
     }
+
+    const callbackMessageId = callback_query?.message?.message_id || null;
 
     if (!chatId) return res.status(200).json({ status: "No chatId" });
     const stateRef = doc(db, "telegram_states", String(chatId));
@@ -1442,6 +1639,50 @@ export default async function handler(req, res) {
     }
 
     const adminChatId = await getAdminChatId();
+
+    // Admin Location Request Approval / Rejection directly inside Telegram Bot
+    if (text.startsWith("APPLOC_") || text.startsWith("REJLOC_")) {
+      if (!adminChatId || chatId.toString() !== adminChatId.toString()) {
+        await sendMessage(chatId, "⚠️ ဤလုပ်ဆောင်ချက်ကို Admin သာ အသုံးပြုနိုင်ပါသည်။");
+        return res.status(200).json({ status: "ok" });
+      }
+      const isApprove = text.startsWith("APPLOC_");
+      const locId = text.replace(/^APPLOC_|^REJLOC_/, "");
+      const locSnap = await getDoc(doc(db, "locations", locId));
+      if (!locSnap.exists()) {
+        await sendMessage(chatId, "ℹ️ ဤမြို့/မြို့နယ် Request ကို စီမံပြီးသား (သို့မဟုတ်) ဖျက်ပြီးသား ဖြစ်ပါသည်။");
+        return res.status(200).json({ status: "ok" });
+      }
+      const locData = locSnap.data();
+      if (isApprove) {
+        const currentCatalog = await getActiveLocationCatalog();
+        const { catalog: updatedCatalog } = addUniqueLocationToCatalog(
+          currentCatalog,
+          locData.city,
+          locData.township
+        );
+        await setDoc(
+          doc(db, "settings", "myanmar_locations"),
+          { regions: updatedCatalog, updatedAt: serverTimestamp() },
+          { merge: true }
+        );
+        await updateDoc(doc(db, "locations", locId), {
+          status: "approved",
+          approvedAt: serverTimestamp(),
+        });
+        await sendMessage(
+          chatId,
+          `✅ <b>မြို့/မြို့နယ်အသစ် အတည်ပြုပြီးပါပြီ!</b>\n\n📍 <b>${escapeHTML(locData.township)}, ${escapeHTML(locData.city)}</b> ကို Master Dropdown စာရင်းထဲသို့ Unique အဖြစ် ထည့်သွင်းပြီးပါပြီ။`
+        );
+      } else {
+        await deleteDoc(doc(db, "locations", locId));
+        await sendMessage(
+          chatId,
+          `❌ <b>${escapeHTML(locData.township)}, ${escapeHTML(locData.city)}</b> Request ကို ပယ်ဖျက်လိုက်ပါပြီ။`
+        );
+      }
+      return res.status(200).json({ status: "ok" });
+    }
 
     // Admin Media Actions: SEND_MEDIA_, ADM_MEDIA_, REQ_REUP_, SKIP_ADM_VID_
     if (
@@ -2342,36 +2583,317 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: "success" });
     }
     if (currentState.step === "GET_PHONE" && text) {
+      const catalog = await getActiveLocationCatalog();
+      const cities = getCitiesFromCatalog(catalog);
+      const { inline_keyboard } = buildCityDropdownKeyboard(cities, 0);
+
       await setDoc(
         stateRef,
-        { step: "GET_CITY", data: { ...currentState.data, phone: text } },
+        {
+          step: "GET_CITY",
+          data: {
+            ...currentState.data,
+            phone: text,
+            cityPage: 0,
+            isCustomCity: false,
+            isCustomLocationRequest: false,
+          },
+        },
         { merge: true }
       );
       await sendMessage(
         chatId,
-        "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ <b>မြို့</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - မန္တလေး):"
+        "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ <b>မြို့ / တိုင်းဒေသကြီး</b> ကို အောက်ပါစာရင်းထဲမှ ရွေးချယ်ပေးပါ -\n\n<i>(စာရင်းထဲတွင် မပါဝင်မှသာ အောက်ဆုံးရှိ '➕ အခြားမြို့' ခလုတ်ကို နှိပ်၍ Request လုပ်ပါ)</i>",
+        { inline_keyboard }
       );
       return res.status(200).json({ status: "success" });
     }
+
     if (currentState.step === "GET_CITY" && text) {
+      const catalog = await getActiveLocationCatalog();
+      const cities = getCitiesFromCatalog(catalog);
+
+      if (text.startsWith("REGCITY_P_")) {
+        const nextPage = parseInt(text.replace("REGCITY_P_", ""), 10) || 0;
+        const { inline_keyboard } = buildCityDropdownKeyboard(cities, nextPage);
+        await setDoc(
+          stateRef,
+          { step: "GET_CITY", data: { ...currentState.data, cityPage: nextPage } },
+          { merge: true }
+        );
+        await editOrSendMessage(
+          chatId,
+          callbackMessageId,
+          "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ <b>မြို့ / တိုင်းဒေသကြီး</b> ကို အောက်ပါစာရင်းထဲမှ ရွေးချယ်ပေးပါ -\n\n<i>(စာရင်းထဲတွင် မပါဝင်မှသာ အောက်ဆုံးရှိ '➕ အခြားမြို့' ခလုတ်ကို နှိပ်၍ Request လုပ်ပါ)</i>",
+          { inline_keyboard }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text === "REGCITY_OTHER") {
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_CUSTOM_CITY",
+            data: { ...currentState.data, isCustomCity: true, isCustomLocationRequest: true },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          "✍️ စာရင်းထဲတွင် မပါဝင်သော <b>မြို့အမည်</b> ကို ရိုက်ထည့်ပေးပါ -\n\n<i>(Admin ထံသို့ မြို့အသစ်အဖြစ် Request ပေးပို့ပေးပါမည်)</i>"
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text.startsWith("REGCITY_S_")) {
+        const cityIdx = parseInt(text.replace("REGCITY_S_", ""), 10);
+        const selectedCity = cities[cityIdx];
+        if (!selectedCity) {
+          const { inline_keyboard } = buildCityDropdownKeyboard(cities, 0);
+          await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ မြို့ကို ပြန်လည်ရွေးချယ်ပေးပါ -", {
+            inline_keyboard,
+          });
+          return res.status(200).json({ status: "success" });
+        }
+
+        const townships = getTownshipsForCity(catalog, selectedCity);
+        if (townships.length === 0) {
+          await setDoc(
+            stateRef,
+            {
+              step: "GET_CUSTOM_TOWNSHIP",
+              data: {
+                ...currentState.data,
+                city: selectedCity,
+                isCustomCity: false,
+                isCustomLocationRequest: true,
+              },
+            },
+            { merge: true }
+          );
+          await sendMessage(
+            chatId,
+            `✍️ <b>${escapeHTML(selectedCity)}</b> ၏ <b>မြို့နယ်အမည်</b> ကို ရိုက်ထည့်ပေးပါ (Admin ထံသို့ Request ပေးပို့ပေးပါမည်):`
+          );
+          return res.status(200).json({ status: "success" });
+        }
+
+        const { inline_keyboard } = buildTownshipDropdownKeyboard(townships, 0);
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_TOWNSHIP",
+            data: {
+              ...currentState.data,
+              city: selectedCity,
+              isCustomCity: false,
+              tspPage: 0,
+            },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✅ ရွေးချယ်ထားသော မြို့: <b>${escapeHTML(selectedCity)}</b>\n\n📍 ကျေးဇူးပြု၍ နေထိုင်ရာ <b>မြို့နယ်</b> ကို အောက်ပါစာရင်းထဲမှ ရွေးချယ်ပေးပါ -\n\n<i>(စာရင်းထဲတွင် မပါဝင်မှသာ '➕ အခြားမြို့နယ်' ခလုတ်ကို နှိပ်၍ Request လုပ်ပါ)</i>`,
+          { inline_keyboard }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      // User typed free text instead of picking from dropdown buttons -> gently guide them
+      const { inline_keyboard } = buildCityDropdownKeyboard(cities, currentState.data.cityPage || 0);
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ မြို့အမည်ကို စာရိုက်မထည့်ဘဲ အောက်ပါ <b>မြို့စာရင်းခလုတ်များ</b> ထဲမှ ရွေးချယ်ပေးပါ။\n\n<i>(စာရင်းထဲတွင် မပါဝင်မှသာ '➕ အခြားမြို့' ခလုတ်ကို နှိပ်၍ ရိုက်ထည့်နိုင်ပါသည်)</i>",
+        { inline_keyboard }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (currentState.step === "GET_CUSTOM_CITY" && text) {
+      const customCity = text.trim();
       await setDoc(
         stateRef,
-        { step: "GET_TOWNSHIP", data: { ...currentState.data, city: text } },
+        {
+          step: "GET_CUSTOM_TOWNSHIP",
+          data: {
+            ...currentState.data,
+            city: customCity,
+            isCustomCity: true,
+            isCustomLocationRequest: true,
+          },
+        },
         { merge: true }
       );
       await sendMessage(
         chatId,
-        "📍 ကျေးဇူးပြု၍ နေထိုင်ရာ <b>မြို့နယ်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - ချမ်းအေးသာစံ):"
+        `✍️ <b>${escapeHTML(customCity)}</b> ရှိ နေထိုင်ရာ <b>မြို့နယ်အမည်</b> ကို ရိုက်ထည့်ပေးပါ -\n\n<i>(Admin ထံသို့ မြို့/မြို့နယ်အသစ် Request အဖြစ် ပေးပို့ပေးပါမည်)</i>`
       );
       return res.status(200).json({ status: "success" });
     }
+
     if (currentState.step === "GET_TOWNSHIP" && text) {
+      const catalog = await getActiveLocationCatalog();
+      const selectedCity = currentState.data.city || "";
+      const townships = getTownshipsForCity(catalog, selectedCity);
+
+      if (text === "REGTWN_BACK_CITY") {
+        const cities = getCitiesFromCatalog(catalog);
+        const { inline_keyboard } = buildCityDropdownKeyboard(cities, currentState.data.cityPage || 0);
+        await setDoc(
+          stateRef,
+          { step: "GET_CITY", data: { ...currentState.data, city: "" } },
+          { merge: true }
+        );
+        await editOrSendMessage(
+          chatId,
+          callbackMessageId,
+          "🏙️ ကျေးဇူးပြု၍ လက်ရှိနေထိုင်ရာ <b>မြို့ / တိုင်းဒေသကြီး</b> ကို ပြန်လည်ရွေးချယ်ပေးပါ -",
+          { inline_keyboard }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text.startsWith("REGTWN_P_")) {
+        const nextPage = parseInt(text.replace("REGTWN_P_", ""), 10) || 0;
+        const { inline_keyboard } = buildTownshipDropdownKeyboard(townships, nextPage);
+        await setDoc(
+          stateRef,
+          { step: "GET_TOWNSHIP", data: { ...currentState.data, tspPage: nextPage } },
+          { merge: true }
+        );
+        await editOrSendMessage(
+          chatId,
+          callbackMessageId,
+          `✅ ရွေးချယ်ထားသော မြို့: <b>${escapeHTML(selectedCity)}</b>\n\n📍 ကျေးဇူးပြု၍ နေထိုင်ရာ <b>မြို့နယ်</b> ကို အောက်ပါစာရင်းထဲမှ ရွေးချယ်ပေးပါ -`,
+          { inline_keyboard }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text === "REGTWN_OTHER") {
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_CUSTOM_TOWNSHIP",
+            data: { ...currentState.data, isCustomLocationRequest: true },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✍️ <b>${escapeHTML(selectedCity)}</b> တွင် စာရင်းထဲမပါဝင်သော <b>မြို့နယ်အမည်</b> ကို ရိုက်ထည့်ပေးပါ -\n\n<i>(Admin ထံသို့ မြို့နယ်အသစ် Request အဖြစ် ပေးပို့ပေးပါမည်)</i>`
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text.startsWith("REGTWN_S_")) {
+        const tspIdx = parseInt(text.replace("REGTWN_S_", ""), 10);
+        const selectedTownship = townships[tspIdx];
+        if (!selectedTownship) {
+          const { inline_keyboard } = buildTownshipDropdownKeyboard(townships, 0);
+          await sendMessage(chatId, "⚠️ ကျေးဇူးပြု၍ မြို့နယ်ကို ပြန်လည်ရွေးချယ်ပေးပါ -", {
+            inline_keyboard,
+          });
+          return res.status(200).json({ status: "success" });
+        }
+
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_ADDRESS",
+            data: {
+              ...currentState.data,
+              township: selectedTownship,
+              isCustomLocationRequest: false,
+            },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✅ ရွေးချယ်ထားသော နေရာ: <b>${escapeHTML(selectedTownship)}, ${escapeHTML(selectedCity)}</b>\n\n🏠 ကျေးဇူးပြု၍ <b>နေရပ်လိပ်စာ အသေးစိတ်</b> ကို ရိုက်ထည့်ပေးပါ:`
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      // User typed free text instead of picking a township button
+      const { inline_keyboard } = buildTownshipDropdownKeyboard(
+        townships,
+        currentState.data.tspPage || 0
+      );
+      await sendMessage(
+        chatId,
+        `⚠️ ကျေးဇူးပြု၍ မြို့နယ်ကို စာရိုက်မထည့်ဘဲ အောက်ပါ <b>${escapeHTML(selectedCity)} မြို့နယ်စာရင်းခလုတ်များ</b> ထဲမှ ရွေးချယ်ပေးပါ။\n\n<i>(စာရင်းထဲတွင် မပါဝင်မှသာ '➕ အခြားမြို့နယ်' ခလုတ်ကို နှိပ်၍ Request လုပ်နိုင်ပါသည်)</i>`,
+        { inline_keyboard }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (currentState.step === "GET_CUSTOM_TOWNSHIP" && text) {
+      const customTownship = text.trim();
+      const targetCity = (currentState.data.city || "").trim();
+      const catalog = await getActiveLocationCatalog();
+
+      let createdLocId = null;
+      if (targetCity && customTownship && !locationExistsInCatalog(catalog, targetCity, customTownship)) {
+        const existingLocSnap = await getDocs(
+          query(
+            collection(db, "locations"),
+            where("city", "==", targetCity),
+            where("township", "==", customTownship)
+          )
+        );
+        if (existingLocSnap.empty) {
+          const locRef = await addDoc(collection(db, "locations"), {
+            city: targetCity,
+            township: customTownship,
+            status: "pending",
+            requestedBy: currentState.data.name || "Telegram Applicant",
+            requestedPhone: currentState.data.phone || "",
+            requestedVia: "telegram_bot",
+            requesterChatId: chatId,
+            createdAt: serverTimestamp(),
+          });
+          createdLocId = locRef.id;
+        }
+      }
+
+      if (adminChatId && createdLocId) {
+        const locReqMsg =
+          `📍 <b>မြို့/မြို့နယ်အသစ် Request အသစ် (Telegram Bot)</b>\n\n` +
+          `🏙️ <b>မြို့:</b> ${escapeHTML(targetCity)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(customTownship)}\n` +
+          `👤 <b>တောင်းဆိုသူ:</b> ${escapeHTML(currentState.data.name || "Applicant")} (${escapeHTML(currentState.data.phone || "-")})\n\n` +
+          `<i>Approve နှိပ်လိုက်ပါက Dropdown Master စာရင်းထဲသို့ Unique အဖြစ် အလိုအလျောက် ထည့်သွင်းပေးပါမည်။</i>`;
+
+        await sendMessage(adminChatId, locReqMsg, {
+          inline_keyboard: [
+            [
+              { text: "✅ Approve & List ထဲထည့်မည်", callback_data: `APPLOC_${createdLocId}` },
+              { text: "❌ Reject", callback_data: `REJLOC_${createdLocId}` },
+            ],
+          ],
+        });
+      }
+
       await setDoc(
         stateRef,
-        { step: "GET_ADDRESS", data: { ...currentState.data, township: text } },
+        {
+          step: "GET_ADDRESS",
+          data: {
+            ...currentState.data,
+            township: customTownship,
+            isCustomLocationRequest: true,
+          },
+        },
         { merge: true }
       );
-      await sendMessage(chatId, "🏠 ကျေးဇူးပြု၍ <b>နေရပ်လိပ်စာ အသေးစိတ်</b> ကို ရိုက်ထည့်ပေးပါ:");
+      await sendMessage(
+        chatId,
+        `📩 <b>${escapeHTML(customTownship)}, ${escapeHTML(targetCity)}</b> ကို Admin ထံသို့ မြို့/မြို့နယ်အသစ် Request ပေးပို့ထားပြီးပါပြီ။\n\n🏠 ယခု <b>နေရပ်လိပ်စာ အသေးစိတ်</b> ကို ဆက်လက်ရိုက်ထည့်ပေးပါ:`
+      );
       return res.status(200).json({ status: "success" });
     }
     if (currentState.step === "GET_ADDRESS" && text) {
@@ -2513,18 +3035,26 @@ export default async function handler(req, res) {
       const applicantData = currentState.data;
       const privateVideoUrl = photos[0];
       const telegramProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-      const locQuery = query(
-        collection(db, "locations"),
-        where("city", "==", applicantData.city),
-        where("township", "==", applicantData.township)
-      );
-      const locSnap = await getDocs(locQuery);
-      if (locSnap.empty) {
-        await addDoc(collection(db, "locations"), {
-          city: applicantData.city,
-          township: applicantData.township,
-          status: "pending",
-        });
+      const activeCatalog = await getActiveLocationCatalog();
+      if (!locationExistsInCatalog(activeCatalog, applicantData.city, applicantData.township)) {
+        const locQuery = query(
+          collection(db, "locations"),
+          where("city", "==", applicantData.city),
+          where("township", "==", applicantData.township)
+        );
+        const locSnap = await getDocs(locQuery);
+        if (locSnap.empty) {
+          await addDoc(collection(db, "locations"), {
+            city: applicantData.city,
+            township: applicantData.township,
+            status: "pending",
+            requestedBy: applicantData.name || "Telegram Applicant",
+            requestedPhone: applicantData.phone || "",
+            requestedVia: "telegram_bot",
+            requesterChatId: chatId,
+            createdAt: serverTimestamp(),
+          });
+        }
       }
 
       const finalData = {

@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { db } from '../config/firebase';
-import { collection, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
+import { collection, doc, getDoc, addDoc, serverTimestamp, getDocs } from 'firebase/firestore';
 import imageCompression from 'browser-image-compression';
 import {
   CheckCircle2,
@@ -13,6 +13,13 @@ import {
   ArrowLeft,
 } from 'lucide-react';
 import { BRAND_LOGO_URL, validateRegistrationForm } from '../utils/catalogLogic';
+import {
+  buildUnifiedLocationCatalog,
+  getCitiesFromCatalog,
+  getTownshipsForCity,
+  locationExistsInCatalog,
+  normalizeLocationKey,
+} from '../utils/myanmarLocations';
 
 export default function Register() {
   const [formData, setFormData] = useState({
@@ -30,6 +37,7 @@ export default function Register() {
   const [customTownship, setCustomTownship] = useState('');
 
   const [locations, setLocations] = useState([]);
+  const [masterRegions, setMasterRegions] = useState(null);
 
   const [publicPhotos, setPublicPhotos] = useState([]);
   const [privatePhotos, setPrivatePhotos] = useState([]);
@@ -44,8 +52,14 @@ export default function Register() {
   useEffect(() => {
     const fetchLocations = async () => {
       try {
-        const snap = await getDocs(collection(db, 'locations'));
-        setLocations(snap.docs.map((doc) => doc.data()));
+        const [masterSnap, locsSnap] = await Promise.all([
+          getDoc(doc(db, 'settings', 'myanmar_locations')),
+          getDocs(collection(db, 'locations')),
+        ]);
+        if (masterSnap.exists() && Array.isArray(masterSnap.data().regions)) {
+          setMasterRegions(masterSnap.data().regions);
+        }
+        setLocations(locsSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
       } catch (err) {
         console.error('Error fetching locations:', err);
       }
@@ -53,18 +67,9 @@ export default function Register() {
     fetchLocations();
   }, []);
 
-  const activeLocations = locations.filter((l) => l.status !== 'pending');
-  const cities = [
-    ...new Set(['Yangon', 'Mandalay', ...activeLocations.map((l) => l.city).filter(Boolean)]),
-  ];
-  const townships = [
-    ...new Set(
-      activeLocations
-        .filter((l) => l.city === formData.city)
-        .map((l) => l.township)
-        .filter(Boolean)
-    ),
-  ];
+  const locationCatalog = buildUnifiedLocationCatalog(masterRegions, locations);
+  const cities = getCitiesFromCatalog(locationCatalog);
+  const townships = getTownshipsForCity(locationCatalog, formData.city);
 
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -137,16 +142,31 @@ export default function Register() {
 
     setIsSubmitting(true);
     try {
-      if (formData.city === 'other' || formData.township === 'other') {
-        const isExist = locations.find(
-          (l) => l.city === finalCity && l.township === finalTownship
+      const isCustomLocationRequest = formData.city === 'other' || formData.township === 'other';
+      let locationRequestId = null;
+
+      if (
+        isCustomLocationRequest &&
+        !locationExistsInCatalog(locationCatalog, finalCity, finalTownship)
+      ) {
+        const isPendingExist = locations.find(
+          (l) =>
+            normalizeLocationKey(l.city) === normalizeLocationKey(finalCity) &&
+            normalizeLocationKey(l.township) === normalizeLocationKey(finalTownship)
         );
-        if (!isExist) {
-          await addDoc(collection(db, 'locations'), {
+        if (!isPendingExist) {
+          const locDocRef = await addDoc(collection(db, 'locations'), {
             city: finalCity,
             township: finalTownship,
             status: 'pending',
+            requestedBy: formData.name.trim(),
+            requestedPhone: formData.phone.trim(),
+            requestedVia: 'web_register',
+            createdAt: serverTimestamp(),
           });
+          locationRequestId = locDocRef.id;
+        } else {
+          locationRequestId = isPendingExist.id || null;
         }
       }
 
@@ -175,6 +195,8 @@ export default function Register() {
           city: finalCity,
           township: finalTownship,
           address: formData.address,
+          isCustomLocationRequest,
+          locationRequestId,
         }),
       }).catch((e) => console.error('Admin bot notification error:', e));
 
@@ -398,24 +420,29 @@ export default function Register() {
                   onChange={handleChange}
                   className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-amber-500 outline-none text-sm cursor-pointer"
                 >
-                  <option value="">-- မြို့ရွေးပါ --</option>
+                  <option value="">-- မြို့ / တိုင်းဒေသကြီး ရွေးချယ်ပါ --</option>
                   {cities.map((c) => (
                     <option key={c} value={c}>
                       {c}
                     </option>
                   ))}
-                  <option value="other">+ အခြား (မြို့အမည် အသစ်ထည့်မည်)</option>
+                  <option value="other">+ အခြား (List ထဲတွင် မရှိပါက Request လုပ်မည်)</option>
                 </select>
                 {formData.city === 'other' && (
-                  <input
-                    type="text"
-                    aria-label="New City Name"
-                    placeholder="မြို့အမည် အသစ် ရိုက်ထည့်ပါ..."
-                    required
-                    value={customCity}
-                    onChange={(e) => setCustomCity(e.target.value)}
-                    className="w-full px-4 py-3 mt-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
-                  />
+                  <div className="mt-3 space-y-1.5">
+                    <input
+                      type="text"
+                      aria-label="Request New City Name"
+                      placeholder="Request လုပ်လိုသော မြို့အမည် ရိုက်ထည့်ပါ..."
+                      required
+                      value={customCity}
+                      onChange={(e) => setCustomCity(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
+                    />
+                    <p className="text-[11px] text-amber-700 font-medium">
+                      Admin ထံသို့ မြို့အသစ် Request အဖြစ် ပေးပို့ပေးပါမည်။
+                    </p>
+                  </div>
                 )}
               </div>
 
@@ -427,15 +454,20 @@ export default function Register() {
                   Township / မြို့နယ် ရွေးချယ်ရန် *
                 </label>
                 {formData.city === 'other' ? (
-                  <input
-                    id="reg-township"
-                    type="text"
-                    placeholder="မြို့နယ်အမည် အသစ် ရိုက်ထည့်ပါ..."
-                    required
-                    value={customTownship}
-                    onChange={(e) => setCustomTownship(e.target.value)}
-                    className="w-full px-4 py-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
-                  />
+                  <div className="space-y-1.5">
+                    <input
+                      id="reg-township"
+                      type="text"
+                      placeholder="Request လုပ်လိုသော မြို့နယ်အမည် ရိုက်ထည့်ပါ..."
+                      required
+                      value={customTownship}
+                      onChange={(e) => setCustomTownship(e.target.value)}
+                      className="w-full px-4 py-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
+                    />
+                    <p className="text-[11px] text-amber-700 font-medium">
+                      Admin ထံသို့ မြို့နယ်အသစ် Request အဖြစ် ပေးပို့ပေးပါမည်။
+                    </p>
+                  </div>
                 ) : (
                   <>
                     <select
@@ -448,7 +480,7 @@ export default function Register() {
                       className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 focus:border-emerald-500 outline-none text-sm cursor-pointer disabled:opacity-50"
                     >
                       <option value="">
-                        {formData.city ? '-- မြို့နယ်ရွေးပါ --' : 'အရင်ဆုံး မြို့ကိုရွေးပါ'}
+                        {formData.city ? '-- မြို့နယ် ရွေးချယ်ပါ --' : 'အရင်ဆုံး မြို့ကိုရွေးပါ'}
                       </option>
                       {townships.map((t) => (
                         <option key={t} value={t}>
@@ -456,19 +488,24 @@ export default function Register() {
                         </option>
                       ))}
                       {formData.city && (
-                        <option value="other">+ အခြား (မြို့နယ်အသစ်ထည့်မည်)</option>
+                        <option value="other">+ အခြား (List ထဲတွင် မရှိပါက Request လုပ်မည်)</option>
                       )}
                     </select>
                     {formData.township === 'other' && (
-                      <input
-                        type="text"
-                        aria-label="New Township Name"
-                        placeholder="မြို့နယ်အမည် အသစ် ရိုက်ထည့်ပါ..."
-                        required
-                        value={customTownship}
-                        onChange={(e) => setCustomTownship(e.target.value)}
-                        className="w-full px-4 py-3 mt-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
-                      />
+                      <div className="mt-3 space-y-1.5">
+                        <input
+                          type="text"
+                          aria-label="Request New Township Name"
+                          placeholder="Request လုပ်လိုသော မြို့နယ်အမည် ရိုက်ထည့်ပါ..."
+                          required
+                          value={customTownship}
+                          onChange={(e) => setCustomTownship(e.target.value)}
+                          className="w-full px-4 py-3 rounded-xl bg-white border border-amber-400 outline-none text-sm"
+                        />
+                        <p className="text-[11px] text-amber-700 font-medium">
+                          Admin ထံသို့ မြို့နယ်အသစ် Request အဖြစ် ပေးပို့ပေးပါမည်။
+                        </p>
+                      </div>
                     )}
                   </>
                 )}

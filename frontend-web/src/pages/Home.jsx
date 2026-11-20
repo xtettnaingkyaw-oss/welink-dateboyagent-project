@@ -17,7 +17,7 @@ import {
   Lock,
 } from 'lucide-react';
 import { db } from '../config/firebase';
-import { collection, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, doc, getDoc, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
 import {
   BRAND_LOGO_URL,
   HERO_LOUNGE_IMAGE,
@@ -27,10 +27,16 @@ import {
   filterAndSortCompanions,
   formatBookingSummary,
 } from '../utils/catalogLogic';
+import {
+  buildUnifiedLocationCatalog,
+  getCitiesFromCatalog,
+  getTownshipsForCity,
+} from '../utils/myanmarLocations';
 
 export default function Home() {
   const [dateBoys, setDateBoys] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [masterRegions, setMasterRegions] = useState(null);
   const [loading, setLoading] = useState(true);
   const [heroImgError, setHeroImgError] = useState(false);
 
@@ -72,12 +78,13 @@ export default function Home() {
     const fetchData = async () => {
       try {
         const qBoys = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-        const [boysSnap, locSnap] = await Promise.all([
+        const [boysSnap, locSnap, masterSnap] = await Promise.all([
           getDocs(qBoys),
           getDocs(collection(db, 'locations')),
+          getDoc(doc(db, 'settings', 'myanmar_locations')),
         ]);
 
-        const rawBoys = boysSnap.docs.map((doc) => ({ id: doc.id, ...doc.data() }));
+        const rawBoys = boysSnap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
         const normalized = rawBoys
           .map((b, idx) => normalizeCompanionRecord(b, idx))
           .filter(Boolean);
@@ -90,7 +97,10 @@ export default function Home() {
           );
         }
 
-        setLocations(locSnap.docs.map((doc) => doc.data()));
+        if (masterSnap.exists() && Array.isArray(masterSnap.data()?.regions)) {
+          setMasterRegions(masterSnap.data().regions);
+        }
+        setLocations(locSnap.docs.map((docItem) => docItem.data()));
       } catch (error) {
         console.error('Error loading directory:', error);
         setDateBoys(
@@ -121,24 +131,26 @@ export default function Home() {
     [locations]
   );
 
+  const locationCatalog = useMemo(
+    () => buildUnifiedLocationCatalog(masterRegions, activeLocations),
+    [masterRegions, activeLocations]
+  );
+
   const cities = useMemo(() => {
-    const locCities = activeLocations.map((l) => l.city).filter(Boolean);
-    const boyCities = dateBoys.map((b) => b.city).filter(Boolean);
-    return [...new Set([...locCities, ...boyCities])];
-  }, [activeLocations, dateBoys]);
+    const catalogCities = getCitiesFromCatalog(locationCatalog);
+    const boyCities = dateBoys.map((b) => String(b.city || '').trim()).filter(Boolean);
+    return [...new Set([...catalogCities, ...boyCities])];
+  }, [locationCatalog, dateBoys]);
 
   const townships = useMemo(() => {
     if (!selectedCity) return [];
-    const locTownships = activeLocations
-      .filter((l) => l.city === selectedCity)
-      .map((l) => l.township)
-      .filter(Boolean);
+    const catalogTownships = getTownshipsForCity(locationCatalog, selectedCity);
     const boyTownships = dateBoys
-      .filter((b) => b.city === selectedCity)
-      .map((b) => b.township)
+      .filter((b) => String(b.city || '').trim() === selectedCity)
+      .map((b) => String(b.township || '').trim())
       .filter(Boolean);
-    return [...new Set([...locTownships, ...boyTownships])];
-  }, [activeLocations, dateBoys, selectedCity]);
+    return [...new Set([...catalogTownships, ...boyTownships])];
+  }, [locationCatalog, dateBoys, selectedCity]);
 
   const filteredBoys = useMemo(
     () =>

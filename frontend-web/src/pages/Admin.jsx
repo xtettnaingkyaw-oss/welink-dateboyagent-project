@@ -63,6 +63,19 @@ import {
   filterBulkMessageRecipients,
   formatBulkMessageForRecipient,
 } from '../utils/catalogLogic';
+import {
+  buildUnifiedLocationCatalog,
+  mergeDefaultMyanmarLocations,
+  addUniqueLocationToCatalog,
+  removeTownshipFromCatalog,
+  removeCityFromCatalog,
+  renameCityInCatalog,
+  renameTownshipInCatalog,
+  getCitiesFromCatalog,
+  getTownshipsForCity,
+  countCatalogStats,
+} from '../utils/myanmarLocations';
+import AdminLocationsManager from '../components/AdminLocationsManager';
 
 const DateBoyCard = ({
   boy,
@@ -82,6 +95,7 @@ const DateBoyCard = ({
   isUploadingEditPhoto,
   requestTelegramMediaReupload,
   reuploadStatus,
+  locationCatalog = [],
 }) => {
   const [brokenImgDetected, setBrokenImgDetected] = useState(false);
 
@@ -184,22 +198,59 @@ const DateBoyCard = ({
               className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E] font-mono tabular-nums"
               placeholder="ဖုန်း"
             />
-            <div className="flex gap-2">
-              <input
-                type="text"
-                value={editBoyData.city || ''}
-                onChange={(e) => setEditBoyData({ ...editBoyData, city: e.target.value })}
-                className="w-1/2 p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E]"
-                placeholder="မြို့"
-              />
-              <input
-                type="text"
-                value={editBoyData.township || ''}
-                onChange={(e) => setEditBoyData({ ...editBoyData, township: e.target.value })}
-                className="w-1/2 p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E]"
-                placeholder="မြို့နယ်"
-              />
-            </div>
+            {(() => {
+              const editCities = getCitiesFromCatalog(locationCatalog);
+              const currentEditCity = String(editBoyData.city || '').trim();
+              const cityOptions =
+                currentEditCity && !editCities.includes(currentEditCity)
+                  ? [currentEditCity, ...editCities]
+                  : editCities;
+
+              const editTownships = getTownshipsForCity(locationCatalog, currentEditCity);
+              const currentEditTownship = String(editBoyData.township || '').trim();
+              const townshipOptions =
+                currentEditTownship && !editTownships.includes(currentEditTownship)
+                  ? [currentEditTownship, ...editTownships]
+                  : editTownships;
+
+              return (
+                <div className="flex gap-2">
+                  <select
+                    aria-label="Edit City"
+                    value={editBoyData.city || ''}
+                    onChange={(e) =>
+                      setEditBoyData({
+                        ...editBoyData,
+                        city: e.target.value,
+                        township: '',
+                      })
+                    }
+                    className="w-1/2 p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-xs outline-none focus:border-[#0C0D0E]"
+                  >
+                    <option value="">-- မြို့ ရွေးရန် --</option>
+                    {cityOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
+                  <select
+                    aria-label="Edit Township"
+                    value={editBoyData.township || ''}
+                    onChange={(e) => setEditBoyData({ ...editBoyData, township: e.target.value })}
+                    disabled={!editBoyData.city}
+                    className="w-1/2 p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-xs outline-none focus:border-[#0C0D0E] disabled:opacity-50"
+                  >
+                    <option value="">-- မြို့နယ် ရွေးရန် --</option>
+                    {townshipOptions.map((t) => (
+                      <option key={t} value={t}>
+                        {t}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              );
+            })()}
             <input
               type="text"
               value={editBoyData.address || ''}
@@ -576,15 +627,12 @@ export default function Admin() {
   const [boys, setBoys] = useState([]);
   const [bookings, setBookings] = useState([]);
   const [locations, setLocations] = useState([]);
+  const [masterRegions, setMasterRegions] = useState(null);
+  const [isSavingLocations, setIsSavingLocations] = useState(false);
   const [clientIds, setClientIds] = useState([]);
   const [bannedUsers, setBannedUsers] = useState([]);
 
-  const [newCity, setNewCity] = useState('');
-  const [newTownship, setNewTownship] = useState('');
   const [modalImage, setModalImage] = useState(null);
-  const [editingLocId, setEditingLocId] = useState(null);
-  const [editCity, setEditCity] = useState('');
-  const [editTownship, setEditTownship] = useState('');
   const [editingBoyId, setEditingBoyId] = useState(null);
   const [editBoyData, setEditBoyData] = useState({});
   const [isUploadingEditPhoto, setIsUploadingEditPhoto] = useState('');
@@ -687,6 +735,14 @@ export default function Admin() {
       if (docSnap.exists()) setAppConfig((prev) => ({ ...prev, ...docSnap.data() }));
     });
 
+    const unsubMasterLocations = onSnapshot(doc(db, 'settings', 'myanmar_locations'), (docSnap) => {
+      if (docSnap.exists() && Array.isArray(docSnap.data()?.regions)) {
+        setMasterRegions(docSnap.data().regions);
+      } else {
+        setMasterRegions(null);
+      }
+    });
+
     return () => {
       unsubAdmins();
       unsubBoys();
@@ -695,6 +751,7 @@ export default function Admin() {
       unsubClients();
       unsubBanned();
       unsubConfig();
+      unsubMasterLocations();
     };
   }, []);
 
@@ -799,8 +856,8 @@ export default function Admin() {
   const pendingLocations = locations.filter((loc) => loc.status === 'pending');
   const approvedLocations = locations.filter((loc) => loc.status !== 'pending');
 
-  const uniqueCities = [...new Set(approvedLocations.map((l) => l.city).filter(Boolean))];
-  const uniqueTownships = [...new Set(approvedLocations.map((l) => l.township).filter(Boolean))];
+  const locationCatalog = buildUnifiedLocationCatalog(masterRegions, approvedLocations);
+  const catalogStats = countCatalogStats(locationCatalog);
 
   // Bulk Message Computed Recipients & Jurisdictions (Only Date Boys with a valid Telegram Chat ID)
   const boysWithChatId = boys.filter((b) => Boolean(extractCompanionChatId(b)));
@@ -1177,55 +1234,192 @@ export default function Admin() {
     showToast('Companion dossier & media updated.', 'success');
   };
 
-  const handleAddLocation = async (e) => {
-    e.preventDefault();
-    if (!newCity || !newTownship) return;
-    await addDoc(collection(db, 'locations'), {
-      city: newCity.trim(),
-      township: newTownship.trim(),
-      status: 'approved',
-    });
-    setNewTownship('');
-    setNewCity('');
-    showToast('မြို့နယ်အသစ် ထည့်သွင်းပြီးပါပြီ။', 'success');
+  const persistMasterCatalog = async (nextRegions) => {
+    setIsSavingLocations(true);
+    try {
+      await setDoc(
+        doc(db, 'settings', 'myanmar_locations'),
+        {
+          regions: nextRegions,
+          updatedAt: serverTimestamp(),
+        },
+        { merge: true }
+      );
+      return true;
+    } catch (err) {
+      console.error('Failed to save master locations:', err);
+      showToast('မြို့နယ်စာရင်း သိမ်းဆည်းရာတွင် အမှားဖြစ်ပွားပါသည်။', 'error');
+      return false;
+    } finally {
+      setIsSavingLocations(false);
+    }
   };
 
-  const startEditLocation = (loc) => {
-    setEditingLocId(loc.id);
-    setEditCity(loc.city);
-    setEditTownship(loc.township);
+  const handleSyncDefaultMyanmar330 = async () => {
+    const merged = mergeDefaultMyanmarLocations(locationCatalog);
+    const ok = await persistMasterCatalog(merged);
+    if (ok) {
+      const mergedStats = countCatalogStats(merged);
+      showToast(
+        `✅ မြန်မာနိုင်ငံ တိုင်း/ပြည်နယ် (${mergedStats.totalCities}) ခု နှင့် မြို့နယ် (${mergedStats.totalTownships}) ခုလုံး Database ထဲသို့ Sync လုပ်ပြီးပါပြီ။`,
+        'success'
+      );
+    }
   };
 
-  const saveEditedLocation = async (loc) => {
-    await updateDoc(doc(db, 'locations', loc.id), {
-      city: editCity.trim(),
-      township: editTownship.trim(),
-      status: 'approved',
-    });
-    const qBoys = query(
-      collection(db, 'dateboys'),
-      where('city', '==', loc.city),
-      where('township', '==', loc.township)
-    );
-    const snap = await getDocs(qBoys);
-    snap.forEach(async (d) => {
-      await updateDoc(doc(db, 'dateboys', d.id), {
-        city: editCity.trim(),
-        township: editTownship.trim(),
+  const handleAddUniqueLocation = async (city, township) => {
+    const { catalog, added, reason } = addUniqueLocationToCatalog(locationCatalog, city, township);
+    if (!added) {
+      showToast(
+        reason === 'duplicate'
+          ? `"${city} — ${township}" သည် စာရင်းထဲတွင် ရှိပြီးသား ဖြစ်ပါသည်။`
+          : 'မြို့နှင့် မြို့နယ်အမည် မှန်ကန်စွာ ထည့်သွင်းပေးပါ။',
+        'error'
+      );
+      return false;
+    }
+    const ok = await persistMasterCatalog(catalog);
+    if (ok) {
+      showToast(`✅ "${city} · ${township}" ကို Unique Master List ထဲသို့ ထည့်သွင်းပြီးပါပြီ။`, 'success');
+    }
+    return ok;
+  };
+
+  const handleRenameCity = async (oldCity, nextCity) => {
+    const updatedCatalog = renameCityInCatalog(locationCatalog, oldCity, nextCity);
+    const ok = await persistMasterCatalog(updatedCatalog);
+    if (!ok) return;
+
+    try {
+      const qBoys = query(collection(db, 'dateboys'), where('city', '==', oldCity));
+      const snap = await getDocs(qBoys);
+      await Promise.all(
+        snap.docs.map((d) => updateDoc(doc(db, 'dateboys', d.id), { city: nextCity }))
+      );
+      const qLocs = query(collection(db, 'locations'), where('city', '==', oldCity));
+      const locSnap = await getDocs(qLocs);
+      await Promise.all(
+        locSnap.docs.map((d) => updateDoc(doc(db, 'locations', d.id), { city: nextCity }))
+      );
+    } catch (err) {
+      console.error('Rename city propagation error:', err);
+    }
+    showToast(`✅ "${oldCity}" ကို "${nextCity}" သို့ ပြင်ဆင်ပြီးပါပြီ။`, 'success');
+  };
+
+  const handleDeleteCity = async (city) => {
+    const updatedCatalog = removeCityFromCatalog(locationCatalog, city);
+    const ok = await persistMasterCatalog(updatedCatalog);
+    if (!ok) return;
+    try {
+      const qLocs = query(collection(db, 'locations'), where('city', '==', city));
+      const locSnap = await getDocs(qLocs);
+      await Promise.all(locSnap.docs.map((d) => deleteDoc(doc(db, 'locations', d.id))));
+    } catch (err) {
+      console.error('Delete legacy city docs error:', err);
+    }
+    showToast(`"${city}" ကို စာရင်းမှ ဖယ်ရှားပြီးပါပြီ။`, 'info');
+  };
+
+  const handleRenameTownship = async (city, oldTownship, nextTownship) => {
+    const updatedCatalog = renameTownshipInCatalog(locationCatalog, city, oldTownship, nextTownship);
+    const ok = await persistMasterCatalog(updatedCatalog);
+    if (!ok) return;
+
+    try {
+      const qBoys = query(
+        collection(db, 'dateboys'),
+        where('city', '==', city),
+        where('township', '==', oldTownship)
+      );
+      const snap = await getDocs(qBoys);
+      await Promise.all(
+        snap.docs.map((d) => updateDoc(doc(db, 'dateboys', d.id), { township: nextTownship }))
+      );
+      const qLocs = query(
+        collection(db, 'locations'),
+        where('city', '==', city),
+        where('township', '==', oldTownship)
+      );
+      const locSnap = await getDocs(qLocs);
+      await Promise.all(
+        locSnap.docs.map((d) => updateDoc(doc(db, 'locations', d.id), { township: nextTownship }))
+      );
+    } catch (err) {
+      console.error('Rename township propagation error:', err);
+    }
+    showToast(`✅ "${oldTownship}" ကို "${nextTownship}" သို့ ပြင်ဆင်ပြီးပါပြီ။`, 'success');
+  };
+
+  const handleDeleteTownship = async (city, township) => {
+    const updatedCatalog = removeTownshipFromCatalog(locationCatalog, city, township);
+    const ok = await persistMasterCatalog(updatedCatalog);
+    if (!ok) return;
+    try {
+      const qLocs = query(
+        collection(db, 'locations'),
+        where('city', '==', city),
+        where('township', '==', township)
+      );
+      const locSnap = await getDocs(qLocs);
+      await Promise.all(locSnap.docs.map((d) => deleteDoc(doc(db, 'locations', d.id))));
+    } catch (err) {
+      console.error('Delete legacy township docs error:', err);
+    }
+    showToast(`"${township}" ကို "${city}" စာရင်းမှ ဖယ်ရှားပြီးပါပြီ။`, 'info');
+  };
+
+  const handleApprovePendingRequest = async (req, finalCity, finalTownship) => {
+    const cleanCity = String(finalCity || req.city || '').trim();
+    const cleanTownship = String(finalTownship || req.township || '').trim();
+    if (!cleanCity || !cleanTownship) return;
+
+    const { catalog } = addUniqueLocationToCatalog(locationCatalog, cleanCity, cleanTownship);
+    const ok = await persistMasterCatalog(catalog);
+    if (!ok) return;
+
+    try {
+      await updateDoc(doc(db, 'locations', req.id), {
+        city: cleanCity,
+        township: cleanTownship,
+        status: 'approved',
+        approvedAt: serverTimestamp(),
       });
-    });
-    setEditingLocId(null);
-    showToast('Location updated.', 'success');
+
+      if (cleanCity !== req.city || cleanTownship !== req.township) {
+        const qBoys = query(
+          collection(db, 'dateboys'),
+          where('city', '==', req.city || ''),
+          where('township', '==', req.township || '')
+        );
+        const snap = await getDocs(qBoys);
+        await Promise.all(
+          snap.docs.map((d) =>
+            updateDoc(doc(db, 'dateboys', d.id), {
+              city: cleanCity,
+              township: cleanTownship,
+            })
+          )
+        );
+      }
+      showToast(
+        `✅ "${cleanCity} · ${cleanTownship}" ကို အတည်ပြုပြီး Master Dropdown List ထဲသို့ ထည့်သွင်းပြီးပါပြီ။`,
+        'success'
+      );
+    } catch (err) {
+      console.error('Approve pending location error:', err);
+      showToast('Location Request အတည်ပြုရာတွင် အမှားဖြစ်ပွားပါသည်။', 'error');
+    }
   };
 
-  const handleApproveLocation = async (id) => {
-    await updateDoc(doc(db, 'locations', id), { status: 'approved' });
-    showToast('Location approved.', 'success');
-  };
-
-  const handleDeleteLocation = async (id) => {
-    await deleteDoc(doc(db, 'locations', id));
-    showToast('Location removed.', 'info');
+  const handleRejectPendingRequest = async (id) => {
+    try {
+      await deleteDoc(doc(db, 'locations', id));
+      showToast('Location Request ကို ပယ်ဖျက်ပြီးပါပြီ။', 'info');
+    } catch (err) {
+      console.error('Reject location error:', err);
+      showToast('Location Request ပယ်ဖျက်ရာတွင် အမှားဖြစ်ပွားပါသည်။', 'error');
+    }
   };
 
   const startEditRules = () => {
@@ -1484,6 +1678,12 @@ export default function Admin() {
             label="Restricted Users"
             count={bannedUsers.length}
           />
+          <TabButton
+            tab="locations"
+            icon={MapPin}
+            label="မြို့ / မြို့နယ်များ"
+            count={pendingLocations.length}
+          />
           <TabButton tab="settings" icon={Settings} label="Agency Settings" count={0} />
           {loggedInAdmin.role === 'super_admin' && (
             <TabButton
@@ -1699,6 +1899,7 @@ export default function Admin() {
                         reuploadStatusByBoyId[boy.id] ||
                         (boy.reuploadRequestedAt ? 'sent' : 'idle')
                       }
+                      locationCatalog={locationCatalog}
                     />
                   ))}
                 </div>
@@ -1775,6 +1976,7 @@ export default function Admin() {
                         reuploadStatusByBoyId[boy.id] ||
                         (boy.reuploadRequestedAt ? 'sent' : 'idle')
                       }
+                      locationCatalog={locationCatalog}
                     />
                   ))}
                 </div>
@@ -2967,242 +3169,80 @@ export default function Admin() {
                 </div>
               </div>
 
-              {/* Locations Management Column */}
+              {/* Locations Master Catalog Quick Summary Card */}
               <div className="space-y-6">
-                <div className="bg-white p-6 rounded-xl border border-[#E6DFD3]">
-                  <h3 className="font-serif text-xl font-semibold text-[#0C0D0E] flex items-center gap-2 mb-4">
-                    <MapPin size={17} className="text-[#9E7B36]" />
-                    <span>မြို့နယ် အသစ်ထည့်ရန်</span>
-                  </h3>
-                  <form onSubmit={handleAddLocation} className="space-y-3">
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newCity}
-                        onChange={(e) => setNewCity(e.target.value)}
-                        placeholder="မြို့ (ဥပမာ — ရန်ကုန်)"
-                        className="w-full p-3 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-xs outline-none focus:bg-white focus:border-[#0C0D0E]"
-                        required
-                      />
-                      {uniqueCities.length > 0 && (
-                        <select
-                          aria-label="Quick select city"
-                          onChange={(e) => {
-                            if (e.target.value) setNewCity(e.target.value);
-                            e.target.value = '';
-                          }}
-                          className="p-3 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-xs outline-none cursor-pointer w-28 text-[#0C0D0E] font-medium"
-                        >
-                          <option value="">Select</option>
-                          {uniqueCities.map((c, i) => (
-                            <option key={`nc-${i}`} value={c}>
-                              {c}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    <div className="flex gap-2">
-                      <input
-                        type="text"
-                        value={newTownship}
-                        onChange={(e) => setNewTownship(e.target.value)}
-                        placeholder="မြို့နယ် (ဥပမာ — ဗဟန်း)"
-                        className="w-full p-3 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-xs outline-none focus:bg-white focus:border-[#0C0D0E]"
-                        required
-                      />
-                      {uniqueTownships.length > 0 && (
-                        <select
-                          aria-label="Quick select township"
-                          onChange={(e) => {
-                            if (e.target.value) setNewTownship(e.target.value);
-                            e.target.value = '';
-                          }}
-                          className="p-3 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-xs outline-none cursor-pointer w-28 text-[#0C0D0E] font-medium"
-                        >
-                          <option value="">Select</option>
-                          {uniqueTownships.map((t, i) => (
-                            <option key={`nt-${i}`} value={t}>
-                              {t}
-                            </option>
-                          ))}
-                        </select>
-                      )}
-                    </div>
-                    <button
-                      type="submit"
-                      className="w-full bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors flex justify-center items-center gap-1.5"
-                    >
-                      <Plus size={15} />
-                      <span>Add Jurisdiction</span>
-                    </button>
-                  </form>
-                </div>
-
-                {pendingLocations.length > 0 && (
-                  <div className="bg-[#F5EFE6] p-6 rounded-xl border border-[#C5A059]">
-                    <h3 className="text-xs font-semibold text-[#9E7B36] mb-4 flex items-center gap-2">
-                      <Clock size={14} />
-                      <span>အတည်ပြုရန် မြို့နယ်များ ({pendingLocations.length})</span>
-                    </h3>
-                    <div className="space-y-2.5">
-                      {pendingLocations.map((loc) => (
-                        <div
-                          key={loc.id}
-                          className="bg-white p-3.5 rounded-lg border border-[#E6DFD3]"
-                        >
-                          {editingLocId === loc.id ? (
-                            <div className="space-y-2">
-                              <input
-                                type="text"
-                                value={editCity}
-                                onChange={(e) => setEditCity(e.target.value)}
-                                className="w-full p-2 bg-[#FAF8F5] border border-[#E6DFD3] rounded text-xs"
-                                placeholder="City"
-                              />
-                              <input
-                                type="text"
-                                value={editTownship}
-                                onChange={(e) => setEditTownship(e.target.value)}
-                                className="w-full p-2 bg-[#FAF8F5] border border-[#E6DFD3] rounded text-xs"
-                                placeholder="Township"
-                              />
-                              <div className="flex gap-2 pt-1">
-                                <button
-                                  type="button"
-                                  onClick={() => saveEditedLocation(loc)}
-                                  className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-1.5 rounded text-xs font-semibold"
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => setEditingLocId(null)}
-                                  className="px-3 bg-[#FAF8F5] text-[#5C564E] rounded text-xs font-semibold border border-[#E6DFD3]"
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <span className="font-semibold text-[#0C0D0E] text-xs block">
-                                  {loc.township}
-                                </span>
-                                <span className="text-[11px] text-[#787167]">{loc.city}</span>
-                              </div>
-                              <div className="flex gap-1.5">
-                                <button
-                                  type="button"
-                                  onClick={() => startEditLocation(loc)}
-                                  aria-label={`Edit ${loc.township}`}
-                                  className="bg-[#FAF8F5] text-[#0C0D0E] p-2 rounded border border-[#E6DFD3]"
-                                >
-                                  <Pencil size={12} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleApproveLocation(loc.id)}
-                                  aria-label={`Approve ${loc.township}`}
-                                  className="bg-[#0C0D0E] text-[#C5A059] p-2 rounded"
-                                >
-                                  <CheckCircle2 size={12} />
-                                </button>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDeleteLocation(loc.id)}
-                                  aria-label={`Delete ${loc.township}`}
-                                  className="bg-rose-50 text-rose-700 p-2 rounded border border-rose-200"
-                                >
-                                  <Trash2 size={12} />
-                                </button>
-                              </div>
-                            </div>
-                          )}
-                        </div>
-                      ))}
+                <div className="bg-white p-6 rounded-xl border border-[#E6DFD3] space-y-5">
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-mono text-[11px] tracking-[0.14em] text-[#9E7B36] font-semibold mb-1">
+                        MYANMAR 330 MASTER LIST
+                      </p>
+                      <h3 className="font-serif text-xl font-semibold text-[#0C0D0E] flex items-center gap-2">
+                        <MapPin size={17} className="text-[#9E7B36]" />
+                        <span>မြို့နှင့် မြို့နယ်များ စီမံခန့်ခွဲရန်</span>
+                      </h3>
                     </div>
                   </div>
-                )}
 
-                <div className="bg-white p-6 rounded-xl border border-[#E6DFD3] max-h-[450px] overflow-y-auto hide-scrollbar">
-                  <h3 className="font-mono text-xs font-semibold text-[#6E675F] mb-4 tabular-nums">
-                    ACTIVE JURISDICTIONS ({approvedLocations.length})
-                  </h3>
-                  <div className="space-y-2">
-                    {approvedLocations.map((loc) => (
-                      <div
-                        key={loc.id}
-                        className="flex justify-between items-center bg-[#FAF8F5] px-4 py-3 rounded-lg border border-[#E6DFD3]"
+                  <p className="text-xs text-[#6E675F] leading-relaxed">
+                    Date Boy Registration (Web &amp; Telegram Bot) Dropdown များအတွက်
+                    မြန်မာနိုင်ငံရှိ တိုင်း/ပြည်နယ် (၁၅) ခုနှင့် မြို့နယ် (၃၃၀) လုံးကို
+                    သီးသန့် <strong>မြို့ / မြို့နယ်များ</strong> Tab တွင် စုစည်းထားပါသည်။
+                  </p>
+
+                  <div className="grid grid-cols-3 gap-3 text-center">
+                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                      <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
+                        {catalogStats.totalCities}
+                      </span>
+                      <span className="text-[11px] text-[#6E675F]">တိုင်း/ပြည်နယ်</span>
+                    </div>
+                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                      <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
+                        {catalogStats.totalTownships}
+                      </span>
+                      <span className="text-[11px] text-[#6E675F]">မြို့နယ်များ</span>
+                    </div>
+                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                      <span
+                        className={`font-mono text-lg font-bold tabular-nums block ${
+                          pendingLocations.length > 0 ? 'text-amber-600' : 'text-[#0C0D0E]'
+                        }`}
                       >
-                        {editingLocId === loc.id ? (
-                          <div className="space-y-2 w-full">
-                            <input
-                              type="text"
-                              value={editCity}
-                              onChange={(e) => setEditCity(e.target.value)}
-                              className="w-full p-2 bg-white border border-[#E6DFD3] rounded text-xs"
-                              placeholder="City"
-                            />
-                            <input
-                              type="text"
-                              value={editTownship}
-                              onChange={(e) => setEditTownship(e.target.value)}
-                              className="w-full p-2 bg-white border border-[#E6DFD3] rounded text-xs"
-                              placeholder="Township"
-                            />
-                            <div className="flex gap-2 pt-1">
-                              <button
-                                type="button"
-                                onClick={() => saveEditedLocation(loc)}
-                                className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-1.5 rounded text-xs font-semibold"
-                              >
-                                Save
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => setEditingLocId(null)}
-                                className="px-3 bg-white text-[#5C564E] rounded text-xs font-semibold border border-[#E6DFD3]"
-                              >
-                                Cancel
-                              </button>
-                            </div>
-                          </div>
-                        ) : (
-                          <>
-                            <div>
-                              <span className="font-semibold text-[#0C0D0E] text-xs block">
-                                {loc.township}
-                              </span>
-                              <span className="text-[11px] text-[#787167]">{loc.city}</span>
-                            </div>
-                            <div className="flex gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => startEditLocation(loc)}
-                                aria-label={`Edit ${loc.township}`}
-                                className="bg-white text-[#0C0D0E] p-2 rounded border border-[#E6DFD3] hover:bg-[#F5EFE6]"
-                              >
-                                <Pencil size={12} />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteLocation(loc.id)}
-                                aria-label={`Delete ${loc.township}`}
-                                className="bg-white text-rose-700 p-2 rounded border border-rose-200 hover:bg-rose-50"
-                              >
-                                <Trash2 size={12} />
-                              </button>
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
+                        {pendingLocations.length}
+                      </span>
+                      <span className="text-[11px] text-[#6E675F]">Requests</span>
+                    </div>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => setActiveTab('locations')}
+                    className="w-full bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors flex justify-center items-center gap-2 cursor-pointer"
+                  >
+                    <MapPin size={15} />
+                    <span>မြို့ / မြို့နယ် စာရင်း (၃၃၀) စီမံခန့်ခွဲမည်</span>
+                  </button>
                 </div>
               </div>
             </div>
+          )}
+
+          {activeTab === 'locations' && (
+            <AdminLocationsManager
+              locationCatalog={locationCatalog}
+              masterRegionsSynced={Boolean(masterRegions)}
+              pendingLocations={pendingLocations}
+              isSavingLocations={isSavingLocations}
+              onSyncDefaultMyanmar330={handleSyncDefaultMyanmar330}
+              onAddUniqueLocation={handleAddUniqueLocation}
+              onRenameCity={handleRenameCity}
+              onDeleteCity={handleDeleteCity}
+              onRenameTownship={handleRenameTownship}
+              onDeleteTownship={handleDeleteTownship}
+              onApprovePendingRequest={handleApprovePendingRequest}
+              onRejectPendingRequest={handleRejectPendingRequest}
+            />
           )}
         </div>
       </div>
