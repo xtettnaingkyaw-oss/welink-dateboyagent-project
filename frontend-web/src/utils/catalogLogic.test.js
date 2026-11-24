@@ -16,6 +16,11 @@ import {
   resolveSafeTelegramLink,
   filterBulkMessageRecipients,
   formatBulkMessageForRecipient,
+  normalizeClientPreference,
+  formatClientPreferenceLabel,
+  formatClientPreferenceShortBadge,
+  matchesClientPreferenceFilter,
+  GIRL_ONLY_REMINDER_MESSAGE,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -367,6 +372,100 @@ test('PWA manifest and iOS Add to Home Screen icons are valid PNGs and linked in
     assert.equal(buf[3], 0x47, `${file} must have PNG signature byte 3 ('G')`);
   }
 });
+
+test('Client Preference (Girl Only / LGBT Only / Both) normalization, Girl Only reminder confirmation, and filtering work end-to-end', () => {
+  // 1. Normalization handles canonical keys, Burmese text, and defaults safely to 'both'
+  assert.equal(normalizeClientPreference('girl_only'), 'girl_only');
+  assert.equal(normalizeClientPreference('Girl Only ပဲ လိုက်မည်'), 'girl_only');
+  assert.equal(normalizeClientPreference('lgbt_only'), 'lgbt_only');
+  assert.equal(normalizeClientPreference('LGBT Only'), 'lgbt_only');
+  assert.equal(normalizeClientPreference('both'), 'both');
+  assert.equal(normalizeClientPreference(undefined), 'both');
+
+  assert.match(formatClientPreferenceLabel('girl_only'), /Girl Only/);
+  assert.equal(formatClientPreferenceShortBadge('lgbt_only'), 'LGBT Only');
+  assert.equal(formatClientPreferenceShortBadge('both'), 'Girl & LGBT (Both)');
+  assert.match(GIRL_ONLY_REMINDER_MESSAGE, /Girl Only/);
+  assert.match(GIRL_ONLY_REMINDER_MESSAGE, /ဧည့်သည်/);
+
+  // 2. matchesClientPreferenceFilter supports exact & client-centric ('for_girl' / 'for_lgbt') filters
+  assert.equal(matchesClientPreferenceFilter('girl_only', 'for_girl'), true);
+  assert.equal(matchesClientPreferenceFilter('both', 'for_girl'), true);
+  assert.equal(matchesClientPreferenceFilter('lgbt_only', 'for_girl'), false);
+  assert.equal(matchesClientPreferenceFilter('lgbt_only', 'for_lgbt'), true);
+  assert.equal(matchesClientPreferenceFilter('both', 'for_lgbt'), true);
+  assert.equal(matchesClientPreferenceFilter('girl_only', 'for_lgbt'), false);
+  assert.equal(matchesClientPreferenceFilter('girl_only', 'girl_only'), true);
+  assert.equal(matchesClientPreferenceFilter('both', 'girl_only'), false);
+
+  // 3. Registration validation requires clientPreference and blocks Girl Only until reminder is confirmed
+  const baseData = {
+    name: 'Thura',
+    age: '23',
+    height: "5' 9\"",
+    phone: '09777111222',
+    city: 'ရန်ကုန် (Yangon)',
+    township: 'စမ်းချောင်း (Sanchaung)',
+    address: 'Sanchaung Street',
+  };
+
+  const missingPref = validateRegistrationForm({
+    formData: { ...baseData, clientPreference: '' },
+    publicPhotos: ['1', '2', '3'],
+    privatePhotos: ['1', '2', '3'],
+    agreeTerms: true,
+    agreePrivacy: true,
+    requireClientPreference: true,
+  });
+  assert.equal(missingPref.valid, false);
+  assert.match(missingPref.error, /Girl Only \/ LGBT Only \/ နှစ်ခုလုံး/);
+
+  const unconfirmedGirlOnly = validateRegistrationForm({
+    formData: { ...baseData, clientPreference: 'girl_only' },
+    publicPhotos: ['1', '2', '3'],
+    privatePhotos: ['1', '2', '3'],
+    agreeTerms: true,
+    agreePrivacy: true,
+    requireClientPreference: true,
+    girlOnlyConfirmed: false,
+  });
+  assert.equal(unconfirmedGirlOnly.valid, false);
+  assert.match(unconfirmedGirlOnly.error, /Girl Only/);
+
+  const confirmedGirlOnly = validateRegistrationForm({
+    formData: { ...baseData, clientPreference: 'girl_only' },
+    publicPhotos: ['1', '2', '3'],
+    privatePhotos: ['1', '2', '3'],
+    agreeTerms: true,
+    agreePrivacy: true,
+    requireClientPreference: true,
+    girlOnlyConfirmed: true,
+  });
+  assert.equal(confirmedGirlOnly.valid, true);
+  assert.equal(confirmedGirlOnly.finalClientPreference, 'girl_only');
+
+  // 4. Directory, Admin, and Bulk Message filtering by clientPreference
+  const companions = [
+    normalizeCompanionRecord({ id: 'g1', name: 'GirlPrefBoy', age: 23, city: 'Yangon', clientPreference: 'girl_only', telegramChatId: '2001' }),
+    normalizeCompanionRecord({ id: 'l1', name: 'LgbtPrefBoy', age: 25, city: 'Yangon', clientPreference: 'lgbt_only', telegramChatId: '2002' }),
+    normalizeCompanionRecord({ id: 'b1', name: 'BothPrefBoy', age: 24, city: 'Yangon', clientPreference: 'both', telegramChatId: '2003' }),
+  ];
+
+  assert.equal(filterAndSortCompanions(companions, { clientPreference: 'girl_only' }).length, 1);
+  assert.equal(filterAndSortCompanions(companions, { clientPreference: 'for_girl' }).length, 2);
+  assert.equal(filterAndSortAdminCompanions(companions, { clientPreference: 'lgbt_only' }).length, 1);
+  assert.equal(
+    filterBulkMessageRecipients(companions, { targetMode: 'all', clientPreference: 'girl_only' }).length,
+    1
+  );
+  const formattedPrefMsg = formatBulkMessageForRecipient(
+    'Hello {name} - {preference}',
+    companions[0],
+    'Notice'
+  );
+  assert.match(formattedPrefMsg, /Girl Only/);
+});
+
 
 
 

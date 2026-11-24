@@ -62,6 +62,10 @@ import {
   resolveSafeTelegramLink,
   filterBulkMessageRecipients,
   formatBulkMessageForRecipient,
+  CLIENT_PREFERENCE_OPTIONS,
+  normalizeClientPreference,
+  formatClientPreferenceLabel,
+  formatClientPreferenceShortBadge,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -251,6 +255,20 @@ const DateBoyCard = ({
                 </div>
               );
             })()}
+            <select
+              aria-label="Edit Client Preference"
+              value={normalizeClientPreference(editBoyData.clientPreference)}
+              onChange={(e) =>
+                setEditBoyData({ ...editBoyData, clientPreference: e.target.value })
+              }
+              className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-xs outline-none focus:border-[#0C0D0E] font-medium"
+            >
+              {CLIENT_PREFERENCE_OPTIONS.map((opt) => (
+                <option key={opt.id} value={opt.id}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
             <input
               type="text"
               value={editBoyData.address || ''}
@@ -331,6 +349,27 @@ const DateBoyCard = ({
                 <span className="text-[#0C0D0E] font-semibold">{boy.height}</span>
                 <span aria-hidden="true">·</span>
                 <span className="text-[#9E7B36] font-mono">Size: {boy.cockSize || 'N/A'}</span>
+              </div>
+              <div className="mt-2">
+                {(() => {
+                  const normPref = normalizeClientPreference(boy.clientPreference);
+                  const badgeStyle =
+                    normPref === 'girl_only'
+                      ? 'bg-amber-50 text-amber-900 border-amber-300'
+                      : normPref === 'lgbt_only'
+                        ? 'bg-purple-50 text-purple-900 border-purple-200'
+                        : 'bg-emerald-50 text-emerald-900 border-emerald-200';
+                  return (
+                    <span
+                      className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md text-[11px] font-semibold border ${badgeStyle}`}
+                    >
+                      <span>🎯 {formatClientPreferenceShortBadge(normPref)}</span>
+                      {normPref === 'girl_only' && (
+                        <span className="text-[10px] opacity-80">(ဧည့်သည်နည်းနိုင်)</span>
+                      )}
+                    </span>
+                  );
+                })()}
               </div>
             </div>
 
@@ -643,12 +682,14 @@ export default function Admin() {
   // Date & Search Filtering State for Pending & Approved Dossiers
   const [dateFilter, setDateFilter] = useState('all'); // 'all' | 'today' | 'yesterday' | 'custom'
   const [customDate, setCustomDate] = useState(() => toLocalDateKey(Date.now()));
+  const [adminPreferenceFilter, setAdminPreferenceFilter] = useState('all');
   const [adminSearchQuery, setAdminSearchQuery] = useState('');
   const [adminSortOrder, setAdminSortOrder] = useState('newest'); // 'newest' | 'oldest'
 
   // Bulk Message (Telegram Bot Broadcast) State
   const [bulkTargetMode, setBulkTargetMode] = useState('all'); // 'all' | 'location' | 'selected'
   const [bulkStatusFilter, setBulkStatusFilter] = useState('all'); // 'all' | 'approved' | 'pending'
+  const [bulkPreferenceFilter, setBulkPreferenceFilter] = useState('all');
   const [bulkCity, setBulkCity] = useState('');
   const [bulkTownship, setBulkTownship] = useState('');
   const [bulkSearchQuery, setBulkSearchQuery] = useState('');
@@ -842,6 +883,7 @@ export default function Admin() {
   const filteredPendingBoys = filterAndSortAdminCompanions(pendingBoys, {
     dateFilter,
     customDate,
+    clientPreference: adminPreferenceFilter,
     searchQuery: adminSearchQuery,
     sortOrder: adminSortOrder,
   });
@@ -849,6 +891,7 @@ export default function Admin() {
   const filteredApprovedBoys = filterAndSortAdminCompanions(approvedBoys, {
     dateFilter,
     customDate,
+    clientPreference: adminPreferenceFilter,
     searchQuery: adminSearchQuery,
     sortOrder: adminSortOrder,
   });
@@ -877,6 +920,7 @@ export default function Admin() {
   const bulkChecklistCandidates = filterBulkMessageRecipients(boys, {
     targetMode: 'all',
     statusFilter: bulkStatusFilter,
+    clientPreference: bulkPreferenceFilter,
     searchQuery: bulkSearchQuery,
   });
 
@@ -884,6 +928,7 @@ export default function Admin() {
   const bulkRecipients = filterBulkMessageRecipients(boys, {
     targetMode: bulkTargetMode,
     statusFilter: bulkTargetMode === 'selected' ? 'all' : bulkStatusFilter,
+    clientPreference: bulkTargetMode === 'selected' ? 'all' : bulkPreferenceFilter,
     selectedCity: bulkCity,
     selectedTownship: bulkTownship,
     searchQuery: bulkTargetMode === 'selected' ? '' : bulkSearchQuery,
@@ -996,6 +1041,7 @@ export default function Admin() {
           boyPhone: boy?.phone || '',
           boyCity: boy?.city || '',
           boyTownship: boy?.township || '',
+          boyClientPreference: normalizeClientPreference(boy?.clientPreference),
           adminUsername: loggedInAdmin?.username || 'Web Admin',
           text: approveMsg,
         }),
@@ -1115,6 +1161,7 @@ export default function Admin() {
       city: boy.city,
       township: boy.township,
       address: boy.address,
+      clientPreference: normalizeClientPreference(boy.clientPreference),
       publicPhotos: Array.isArray(boy.publicPhotos)
         ? boy.publicPhotos
         : boy.publicPhoto
@@ -1821,6 +1868,35 @@ export default function Admin() {
                   </button>
                 </div>
               </div>
+
+              {/* Client Preference Segmented Filter Row */}
+              <div className="pt-3 border-t border-[#EFECE6] flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold text-[#5C564E] mr-1">
+                  ဧည့်သည်အမျိုးအစား (Client Preference):
+                </span>
+                {[
+                  { id: 'all', label: 'အားလုံး (All)' },
+                  { id: 'both', label: '🌟 နှစ်ခုလုံး (Girl & LGBT)' },
+                  { id: 'lgbt_only', label: '🏳️‍🌈 LGBT Only' },
+                  { id: 'girl_only', label: '👩 Girl Only' },
+                ].map((prefTab) => {
+                  const active = adminPreferenceFilter === prefTab.id;
+                  return (
+                    <button
+                      key={prefTab.id}
+                      type="button"
+                      onClick={() => setAdminPreferenceFilter(prefTab.id)}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors cursor-pointer ${
+                        active
+                          ? 'bg-[#0C0D0E] text-[#FAF8F5]'
+                          : 'bg-[#FAF8F5] text-[#5C564E] hover:text-[#0C0D0E] border border-[#E6DFD3]'
+                      }`}
+                    >
+                      {prefTab.label}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -1829,13 +1905,17 @@ export default function Admin() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
                   စောင့်ဆိုင်းနေသော လျှောက်လွှာများ ({filteredPendingBoys.length}
-                  {dateFilter !== 'all' || adminSearchQuery ? ` / ${pendingBoys.length}` : ''})
+                  {dateFilter !== 'all' || adminPreferenceFilter !== 'all' || adminSearchQuery
+                    ? ` / ${pendingBoys.length}`
+                    : ''}
+                  )
                 </h2>
-                {(dateFilter !== 'all' || adminSearchQuery) && (
+                {(dateFilter !== 'all' || adminPreferenceFilter !== 'all' || adminSearchQuery) && (
                   <button
                     type="button"
                     onClick={() => {
                       setDateFilter('all');
+                      setAdminPreferenceFilter('all');
                       setAdminSearchQuery('');
                     }}
                     className="text-xs font-semibold text-[#9E7B36] hover:underline cursor-pointer"
@@ -1861,18 +1941,22 @@ export default function Admin() {
                             ? `"${adminSearchQuery}" နှင့် ကိုက်ညီသော လျှောက်လွှာ မတွေ့ရှိပါ။`
                             : 'လောလောဆယ် အသစ်လျှောက်ထားသူ မရှိသေးပါ ခင်ဗျာ။'}
                   </p>
-                  {pendingBoys.length > 0 && (dateFilter !== 'all' || adminSearchQuery) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDateFilter('all');
-                        setAdminSearchQuery('');
-                      }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
-                    >
-                      <span>Pending အားလုံး ({pendingBoys.length} ဦး) ပြန်ကြည့်မည်</span>
-                    </button>
-                  )}
+                  {pendingBoys.length > 0 &&
+                    (dateFilter !== 'all' ||
+                      adminPreferenceFilter !== 'all' ||
+                      adminSearchQuery) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDateFilter('all');
+                          setAdminPreferenceFilter('all');
+                          setAdminSearchQuery('');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
+                      >
+                        <span>Pending အားလုံး ({pendingBoys.length} ဦး) ပြန်ကြည့်မည်</span>
+                      </button>
+                    )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -1912,13 +1996,19 @@ export default function Admin() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
                   လက်ရှိ Date Boys အားလုံး ({filteredApprovedBoys.length}
-                  {dateFilter !== 'all' || adminSearchQuery ? ` / ${approvedBoys.length}` : ''})
+                  {dateFilter !== 'all' || adminPreferenceFilter !== 'all' || adminSearchQuery
+                    ? ` / ${approvedBoys.length}`
+                    : ''}
+                  )
                 </h2>
-                {(dateFilter !== 'all' || adminSearchQuery) && (
+                {(dateFilter !== 'all' ||
+                  adminPreferenceFilter !== 'all' ||
+                  adminSearchQuery) && (
                   <button
                     type="button"
                     onClick={() => {
                       setDateFilter('all');
+                      setAdminPreferenceFilter('all');
                       setAdminSearchQuery('');
                     }}
                     className="text-xs font-semibold text-[#9E7B36] hover:underline cursor-pointer"
@@ -1934,22 +2024,26 @@ export default function Admin() {
                     <UserCheck size={22} />
                   </div>
                   <p className="text-sm font-semibold text-[#0C0D0E]">
-                    {dateFilter !== 'all' || adminSearchQuery
-                      ? 'ရွေးချယ်ထားသော ရက်စွဲ သို့မဟုတ် ရှာဖွေမှုနှင့် ကိုက်ညီသော Date Boy မရှိပါ။'
+                    {dateFilter !== 'all' || adminPreferenceFilter !== 'all' || adminSearchQuery
+                      ? 'ရွေးချယ်ထားသော စစ်ထုတ်မှု သို့မဟုတ် ရှာဖွေမှုနှင့် ကိုက်ညီသော Date Boy မရှိပါ။'
                       : 'စနစ်ထဲတွင် အတည်ပြုထားသော Date Boy မရှိသေးပါ။'}
                   </p>
-                  {approvedBoys.length > 0 && (dateFilter !== 'all' || adminSearchQuery) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setDateFilter('all');
-                        setAdminSearchQuery('');
-                      }}
-                      className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
-                    >
-                      <span>Approved အားလုံး ({approvedBoys.length} ဦး) ပြန်ကြည့်မည်</span>
-                    </button>
-                  )}
+                  {approvedBoys.length > 0 &&
+                    (dateFilter !== 'all' ||
+                      adminPreferenceFilter !== 'all' ||
+                      adminSearchQuery) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDateFilter('all');
+                          setAdminPreferenceFilter('all');
+                          setAdminSearchQuery('');
+                        }}
+                        className="inline-flex items-center gap-1.5 px-4 py-2 rounded-lg bg-[#0C0D0E] text-[#FAF8F5] text-xs font-semibold hover:bg-[#1E2126] transition-colors cursor-pointer"
+                      >
+                        <span>Approved အားလုံး ({approvedBoys.length} ဦး) ပြန်ကြည့်မည်</span>
+                      </button>
+                    )}
                 </div>
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
@@ -2090,6 +2184,34 @@ export default function Admin() {
                           }`}
                         >
                           {st.label}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Client Preference Filter in Bulk Message */}
+                  <div className="space-y-2">
+                    <label className="block text-xs font-semibold text-[#0C0D0E]">
+                      ဧည့်သည်အမျိုးအစား (Client Preference) အလိုက် စစ်ထုတ်ရန်:
+                    </label>
+                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                      {[
+                        { id: 'all', label: 'အားလုံး' },
+                        { id: 'both', label: 'နှစ်ခုလုံး' },
+                        { id: 'lgbt_only', label: 'LGBT Only' },
+                        { id: 'girl_only', label: 'Girl Only' },
+                      ].map((pf) => (
+                        <button
+                          key={pf.id}
+                          type="button"
+                          onClick={() => setBulkPreferenceFilter(pf.id)}
+                          className={`py-2 px-2.5 rounded-lg text-xs font-semibold border transition-colors cursor-pointer ${
+                            bulkPreferenceFilter === pf.id
+                              ? 'bg-[#F5EFE6] border-[#C5A059] text-[#0C0D0E]'
+                              : 'bg-[#FAF8F5] border-[#E6DFD3] text-[#6E675F] hover:text-[#0C0D0E]'
+                          }`}
+                        >
+                          {pf.label}
                         </button>
                       ))}
                     </div>

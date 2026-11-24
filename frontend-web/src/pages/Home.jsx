@@ -26,6 +26,7 @@ import {
   normalizeCompanionRecord,
   filterAndSortCompanions,
   formatBookingSummary,
+  formatClientPreferenceShortBadge,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -45,6 +46,7 @@ export default function Home() {
   const [selectedTownship, setSelectedTownship] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [ageRange, setAgeRange] = useState('all');
+  const [selectedPreference, setSelectedPreference] = useState('all');
   const [sortBy, setSortBy] = useState('featured');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
 
@@ -159,11 +161,22 @@ export default function Home() {
         selectedTownship,
         searchQuery,
         ageRange,
+        clientPreference: selectedPreference,
         sortBy,
         showFavoritesOnly,
         favorites,
       }),
-    [dateBoys, selectedCity, selectedTownship, searchQuery, ageRange, sortBy, showFavoritesOnly, favorites]
+    [
+      dateBoys,
+      selectedCity,
+      selectedTownship,
+      searchQuery,
+      ageRange,
+      selectedPreference,
+      sortBy,
+      showFavoritesOnly,
+      favorites,
+    ]
   );
 
   const resetAllFilters = () => {
@@ -171,6 +184,7 @@ export default function Home() {
     setSelectedTownship('');
     setSearchQuery('');
     setAgeRange('all');
+    setSelectedPreference('all');
     setSortBy('featured');
     setShowFavoritesOnly(false);
   };
@@ -180,6 +194,7 @@ export default function Home() {
     Boolean(selectedTownship) ||
     Boolean(searchQuery.trim()) ||
     ageRange !== 'all' ||
+    selectedPreference !== 'all' ||
     showFavoritesOnly;
 
   const openBoyModal = (boy, initialStep = 'profile') => {
@@ -475,7 +490,7 @@ export default function Home() {
             </div>
           </div>
 
-          {/* Secondary Row: Interactive Segmented Age Filter, Saved Toggle, Sort & Reset */}
+          {/* Secondary Row: Interactive Segmented Age Filter, Client Preference Filter, Saved Toggle, Sort & Reset */}
           <div className="flex flex-wrap items-center justify-between gap-3 pt-4 border-t border-slate-100 text-xs">
             <div className="flex flex-wrap items-center gap-2">
               <span className="text-slate-500 font-medium mr-1">Age Bracket:</span>
@@ -485,13 +500,38 @@ export default function Home() {
                     key={range}
                     type="button"
                     onClick={() => setAgeRange(range)}
-                    className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0 ${
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
                       ageRange === range
                         ? 'bg-slate-900 text-white shadow-sm'
                         : 'text-slate-600 hover:text-slate-900'
                     }`}
                   >
                     {range === 'all' ? 'All Ages' : `${range} Yrs`}
+                  </button>
+                ))}
+              </div>
+
+              <span className="text-slate-500 font-medium ml-1 mr-1">Client Type:</span>
+              <div className="inline-flex flex-wrap items-center gap-1 p-1 bg-slate-100 rounded-xl border border-slate-200/70">
+                {[
+                  { id: 'all', label: 'အားလုံး (All)' },
+                  { id: 'for_girl', label: 'For Girl (Girl & Both)' },
+                  { id: 'for_lgbt', label: 'For LGBT (LGBT & Both)' },
+                  { id: 'both', label: 'နှစ်ခုလုံး (Both)' },
+                  { id: 'girl_only', label: 'Girl Only' },
+                  { id: 'lgbt_only', label: 'LGBT Only' },
+                ].map((prefItem) => (
+                  <button
+                    key={prefItem.id}
+                    type="button"
+                    onClick={() => setSelectedPreference(prefItem.id)}
+                    className={`px-3 py-1.5 rounded-lg font-semibold transition-colors whitespace-nowrap shrink-0 cursor-pointer ${
+                      selectedPreference === prefItem.id
+                        ? 'bg-slate-900 text-white shadow-sm'
+                        : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {prefItem.label}
                   </button>
                 ))}
               </div>
@@ -668,6 +708,11 @@ export default function Home() {
                         <span className="text-slate-900 font-semibold">{boy.age} Yrs</span>
                         <span aria-hidden="true">·</span>
                         <span className="text-slate-900 font-semibold">{boy.height}</span>
+                        <span aria-hidden="true">·</span>
+                        <span className="text-amber-700 font-semibold">
+                          {boy.clientPreferenceShort ||
+                            formatClientPreferenceShortBadge(boy.clientPreference)}
+                        </span>
                         <span aria-hidden="true">·</span>
                         <span className="truncate text-emerald-700 font-medium">
                           {boy.township}, {boy.city}
@@ -886,6 +931,15 @@ export default function Home() {
                           </span>
                           <span className="font-mono text-lg font-semibold text-slate-900 tabular-nums">
                             {selectedBoy.height || '-'}
+                          </span>
+                        </div>
+                        <div className="col-span-2 p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex items-center justify-between">
+                          <span className="text-[11px] font-medium text-slate-500">
+                            Client Preference / လက်ခံသော ဧည့်သည်
+                          </span>
+                          <span className="font-mono text-xs sm:text-sm font-semibold text-emerald-800">
+                            {selectedBoy.clientPreferenceLabel ||
+                              formatClientPreferenceShortBadge(selectedBoy.clientPreference)}
                           </span>
                         </div>
                       </div>

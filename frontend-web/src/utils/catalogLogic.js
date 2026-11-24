@@ -119,6 +119,91 @@ export function isLegacyExpiredProneTelegramMedia(rawBoy) {
   return hasLegacyPub || hasLegacyPriv || hasLegacyVid;
 }
 
+export const CLIENT_PREFERENCE_OPTIONS = [
+  {
+    id: 'both',
+    label: 'နှစ်ခုလုံး (Girl & LGBT နှစ်မျိုးလုံး အဆင်ပြေသည်)',
+    shortLabel: 'Girl & LGBT (Both)',
+    botButtonText: '🌟 နှစ်ခုလုံး (Girl & LGBT အဆင်ပြေသည်)',
+    desc: 'အမျိုးသမီး ဧည့်သည်ရော LGBT ဧည့်သည်ပါ နှစ်မျိုးလုံး လက်ခံနိုင်သည် (ဧည့်သည်ရရှိနိုင်ခြေ အမြင့်ဆုံး)',
+  },
+  {
+    id: 'lgbt_only',
+    label: 'LGBT Only (LGBT သီးသန့်သာ လိုက်မည်)',
+    shortLabel: 'LGBT Only',
+    botButtonText: '🏳️‍🌈 LGBT Only (LGBT သီးသန့်)',
+    desc: 'LGBT ဧည့်သည် သီးသန့်သာ လက်ခံလိုသည်',
+  },
+  {
+    id: 'girl_only',
+    label: 'Girl Only (အမျိုးသမီး သီးသန့်သာ လိုက်မည်)',
+    shortLabel: 'Girl Only',
+    botButtonText: '👩 Girl Only (အမျိုးသမီး သီးသန့်)',
+    desc: 'အမျိုးသမီး ဧည့်သည် သီးသန့်သာ လက်ခံလိုသည် (⚠️ ဧည့်သည်ရရှိမှု နည်းပါးနိုင်ပါသည်)',
+  },
+];
+
+export const GIRL_ONLY_REMINDER_MESSAGE =
+  '⚠️ သတိပေးချက် (Reminder): "Girl Only (အမျိုးသမီး သီးသန့်)" သာ ရွေးချယ်ထားပါက အေဂျင်စီ၏ လက်ရှိ ဧည့်သည်ခေါ်ယူမှု အချိုးအစားအရ ဧည့်သည်ရရှိမှု သိသာစွာ နည်းပါးနိုင်ပြီး အချိန်ပိုမိုစောင့်ဆိုင်းရနိုင်ပါသည်။ ဧည့်သည် ပိုမိုမြန်ဆန်စွာ ရရှိလိုပါက "နှစ်ခုလုံး (Girl & LGBT အဆင်ပြေသည်)" ကို ရွေးချယ်ရန် အကြံပြုပါသည်။';
+
+/**
+ * Normalizes any raw clientPreference value ('girl_only' | 'lgbt_only' | 'both')
+ * defaulting to 'both' for legacy records that predate this field.
+ */
+export function normalizeClientPreference(rawPref) {
+  if (!rawPref || typeof rawPref !== 'string') return 'both';
+  const clean = rawPref.trim().toLowerCase();
+  if (clean === 'girl_only' || clean === 'girl' || clean.includes('girl only')) {
+    return 'girl_only';
+  }
+  if (clean === 'lgbt_only' || clean === 'lgbt' || clean.includes('lgbt only')) {
+    return 'lgbt_only';
+  }
+  if (clean === 'both' || clean.includes('နှစ်ခုလုံး')) {
+    return 'both';
+  }
+  return 'both';
+}
+
+/**
+ * Returns a full human-readable Burmese + English label for a client preference code.
+ */
+export function formatClientPreferenceLabel(rawPref) {
+  const norm = normalizeClientPreference(rawPref);
+  const found = CLIENT_PREFERENCE_OPTIONS.find((o) => o.id === norm);
+  return found ? found.label : CLIENT_PREFERENCE_OPTIONS[0].label;
+}
+
+/**
+ * Returns a compact badge label ('Girl & LGBT (Both)' | 'LGBT Only' | 'Girl Only').
+ */
+export function formatClientPreferenceShortBadge(rawPref) {
+  const norm = normalizeClientPreference(rawPref);
+  const found = CLIENT_PREFERENCE_OPTIONS.find((o) => o.id === norm);
+  return found ? found.shortLabel : 'Girl & LGBT (Both)';
+}
+
+/**
+ * Checks if a companion's clientPreference matches a requested filter:
+ * - 'all' or '': matches everyone
+ * - 'girl_only': matches strictly 'girl_only'
+ * - 'lgbt_only': matches strictly 'lgbt_only'
+ * - 'both': matches strictly 'both'
+ * - 'for_girl': matches companions available for female clients ('girl_only' OR 'both')
+ * - 'for_lgbt': matches companions available for LGBT clients ('lgbt_only' OR 'both')
+ */
+export function matchesClientPreferenceFilter(boyPref, filterValue = 'all') {
+  if (!filterValue || filterValue === 'all') return true;
+  const norm = normalizeClientPreference(boyPref);
+  if (filterValue === 'for_girl') {
+    return norm === 'girl_only' || norm === 'both';
+  }
+  if (filterValue === 'for_lgbt') {
+    return norm === 'lgbt_only' || norm === 'both';
+  }
+  return norm === filterValue;
+}
+
 /**
  * Normalizes a companion document from Firestore (supporting both legacy `publicPhoto`,
  * multi-photo `publicPhotos` arrays, and permanent `publicFileIds`/`privateFileIds` from Telegram Bot).
@@ -177,6 +262,8 @@ export function normalizeCompanionRecord(rawBoy, index = 0) {
     'video'
   );
 
+  const clientPreference = normalizeClientPreference(rawBoy.clientPreference);
+
   return {
     ...rawBoy,
     id,
@@ -187,6 +274,9 @@ export function normalizeCompanionRecord(rawBoy, index = 0) {
     cockSize: rawBoy.cockSize ? String(rawBoy.cockSize).trim() : '',
     city: rawBoy.city ? String(rawBoy.city).trim() : 'Yangon',
     township: rawBoy.township ? String(rawBoy.township).trim() : 'Central',
+    clientPreference,
+    clientPreferenceLabel: formatClientPreferenceLabel(clientPreference),
+    clientPreferenceShort: formatClientPreferenceShortBadge(clientPreference),
     publicPhotos,
     primaryPhoto,
     hasUploadedPhoto: resolvedPublicList.length > 0,
@@ -205,6 +295,7 @@ export function filterAndSortCompanions(boys, filters = {}) {
     selectedTownship = '',
     searchQuery = '',
     ageRange = 'all',
+    clientPreference = 'all',
     sortBy = 'featured',
     showFavoritesOnly = false,
     favorites = [],
@@ -218,6 +309,7 @@ export function filterAndSortCompanions(boys, filters = {}) {
       if (selectedCity && boy.city !== selectedCity) return false;
       if (selectedTownship && boy.township !== selectedTownship) return false;
       if (showFavoritesOnly && !favorites.includes(boy.id)) return false;
+      if (!matchesClientPreferenceFilter(boy.clientPreference, clientPreference)) return false;
 
       if (searchQuery && searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
@@ -225,7 +317,10 @@ export function filterAndSortCompanions(boys, filters = {}) {
         const matchCity = boy.city?.toLowerCase().includes(q);
         const matchTownship = boy.township?.toLowerCase().includes(q);
         const matchCode = boy.boyCode?.toLowerCase().includes(q);
-        if (!matchName && !matchCity && !matchTownship && !matchCode) return false;
+        const matchPref = formatClientPreferenceLabel(boy.clientPreference)
+          .toLowerCase()
+          .includes(q);
+        if (!matchName && !matchCity && !matchTownship && !matchCode && !matchPref) return false;
       }
 
       if (ageRange !== 'all') {
@@ -258,6 +353,8 @@ export function validateRegistrationForm({
   privatePhotos = [],
   agreeTerms = false,
   agreePrivacy = false,
+  requireClientPreference = false,
+  girlOnlyConfirmed = true,
 }) {
   const name = (formData.name || '').trim();
   const age = (formData.age || '').toString().trim();
@@ -279,6 +376,27 @@ export function validateRegistrationForm({
     return {
       valid: false,
       error: 'အသက်သည် ၁၈ နှစ်နှင့် အထက် ဖြစ်ရပါမည်။',
+      finalCity: '',
+      finalTownship: '',
+    };
+  }
+
+  const rawPref = String(formData.clientPreference || '').trim();
+  if (requireClientPreference && !['girl_only', 'lgbt_only', 'both'].includes(rawPref)) {
+    return {
+      valid: false,
+      error:
+        'ကျေးဇူးပြု၍ လက်ခံလိုသော ဧည့်သည်အမျိုးအစား (Girl Only / LGBT Only / နှစ်ခုလုံး) ကို ရွေးချယ်ပေးပါ။',
+      finalCity: '',
+      finalTownship: '',
+    };
+  }
+
+  if (rawPref === 'girl_only' && !girlOnlyConfirmed) {
+    return {
+      valid: false,
+      error:
+        'Girl Only သီးသန့် ရွေးချယ်ထားပါက ဧည့်သည်ရရှိမှု နည်းပါးနိုင်ကြောင်း သတိပေးချက်ကို သိရှိသဘောတူကြောင်း အမှန်ခြစ်ပေးပါ။',
       finalCity: '',
       finalTownship: '',
     };
@@ -332,6 +450,7 @@ export function validateRegistrationForm({
     error: null,
     finalCity,
     finalTownship,
+    finalClientPreference: normalizeClientPreference(rawPref || 'both'),
   };
 }
 
@@ -341,10 +460,12 @@ export function validateRegistrationForm({
 export function formatBookingSummary({ bookingRef, boy, bookingForm }) {
   if (!boy || !bookingForm) return '';
   const code = boy.boyCode || `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`;
+  const prefLabel = formatClientPreferenceShortBadge(boy.clientPreference);
   return [
     'WE LINK — PRIVATE CONCIERGE RESERVATION',
     `Reference: ${bookingRef}`,
     `Companion: ${boy.name} (${code})`,
+    `Preference: ${prefLabel}`,
     `Location: ${boy.township}, ${boy.city}`,
     `Client: ${bookingForm.clientName}`,
     `Contact: ${bookingForm.clientContact}`,
@@ -487,7 +608,7 @@ export function computeAdminDateCounts(boys, nowMs = Date.now()) {
 
 /**
  * Filters and sorts Admin companion lists (Pending Applications or Approved Roster)
- * by date ('all' | 'today' | 'yesterday' | 'custom'), search query, and sortOrder ('newest' | 'oldest').
+ * by date ('all' | 'today' | 'yesterday' | 'custom'), clientPreference, search query, and sortOrder ('newest' | 'oldest').
  * Always defaults to newest-first so newly submitted Telegram Bot applications appear at #1.
  */
 export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.now()) {
@@ -495,6 +616,7 @@ export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.no
   const {
     dateFilter = 'all',
     customDate = '',
+    clientPreference = 'all',
     searchQuery = '',
     sortOrder = 'newest',
   } = options;
@@ -509,6 +631,10 @@ export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.no
     .filter((boy) => {
       if (!boy) return false;
 
+      if (!matchesClientPreferenceFilter(boy.clientPreference, clientPreference)) {
+        return false;
+      }
+
       if (dateFilter !== 'all') {
         const itemKey = toLocalDateKey(getCompanionTimestampMs(boy));
         if (!itemKey) return false;
@@ -522,12 +648,24 @@ export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.no
       if (cleanSearch) {
         const boyCode = `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`.toLowerCase();
         const nameMatch = String(boy.name || '').toLowerCase().includes(cleanSearch);
-        const codeMatch = boyCode.includes(cleanSearch) || String(boy.id || '').toLowerCase().includes(cleanSearch);
+        const codeMatch =
+          boyCode.includes(cleanSearch) || String(boy.id || '').toLowerCase().includes(cleanSearch);
         const phoneMatch = String(boy.phone || '').toLowerCase().includes(cleanSearch);
         const cityMatch = String(boy.city || '').toLowerCase().includes(cleanSearch);
         const townshipMatch = String(boy.township || '').toLowerCase().includes(cleanSearch);
         const addrMatch = String(boy.address || '').toLowerCase().includes(cleanSearch);
-        if (!nameMatch && !codeMatch && !phoneMatch && !cityMatch && !townshipMatch && !addrMatch) {
+        const prefMatch = formatClientPreferenceLabel(boy.clientPreference)
+          .toLowerCase()
+          .includes(cleanSearch);
+        if (
+          !nameMatch &&
+          !codeMatch &&
+          !phoneMatch &&
+          !cityMatch &&
+          !townshipMatch &&
+          !addrMatch &&
+          !prefMatch
+        ) {
           return false;
         }
       }
@@ -550,7 +688,12 @@ export function filterAndSortAdminCompanions(boys, options = {}, nowMs = Date.no
  */
 export function extractCompanionChatId(boy) {
   if (!boy || typeof boy !== 'object') return '';
-  if (boy.telegramChatId !== undefined && boy.telegramChatId !== null && String(boy.telegramChatId).trim() !== '' && String(boy.telegramChatId).trim() !== '0') {
+  if (
+    boy.telegramChatId !== undefined &&
+    boy.telegramChatId !== null &&
+    String(boy.telegramChatId).trim() !== '' &&
+    String(boy.telegramChatId).trim() !== '0'
+  ) {
     return String(boy.telegramChatId).trim();
   }
   if (typeof boy.telegramProfileLink === 'string') {
@@ -584,13 +727,14 @@ export function resolveSafeTelegramLink(boy) {
 
 /**
  * Filters Date Boys eligible for Telegram Bot Bulk Messaging (must have a valid Telegram Chat ID)
- * based on mode ('all' | 'location' | 'selected'), statusFilter, city, township, searchQuery, and selectedIds.
+ * based on mode ('all' | 'location' | 'selected'), statusFilter, clientPreference, city, township, searchQuery, and selectedIds.
  */
 export function filterBulkMessageRecipients(boys, options = {}) {
   if (!Array.isArray(boys)) return [];
   const {
     targetMode = 'all', // 'all' | 'location' | 'selected'
     statusFilter = 'all', // 'all' | 'approved' | 'pending' | 'hidden'
+    clientPreference = 'all',
     selectedCity = '',
     selectedTownship = '',
     searchQuery = '',
@@ -606,6 +750,13 @@ export function filterBulkMessageRecipients(boys, options = {}) {
   return withChatId
     .filter((boy) => {
       if (statusFilter !== 'all' && boy.status !== statusFilter) {
+        return false;
+      }
+
+      if (
+        targetMode !== 'selected' &&
+        !matchesClientPreferenceFilter(boy.clientPreference, clientPreference)
+      ) {
         return false;
       }
 
@@ -625,7 +776,8 @@ export function filterBulkMessageRecipients(boys, options = {}) {
       if (cleanSearch && targetMode !== 'selected') {
         const boyCode = `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`.toLowerCase();
         const matchName = String(boy.name || '').toLowerCase().includes(cleanSearch);
-        const matchCode = boyCode.includes(cleanSearch) || String(boy.id || '').toLowerCase().includes(cleanSearch);
+        const matchCode =
+          boyCode.includes(cleanSearch) || String(boy.id || '').toLowerCase().includes(cleanSearch);
         const matchPhone = String(boy.phone || '').toLowerCase().includes(cleanSearch);
         const matchCity = String(boy.city || '').toLowerCase().includes(cleanSearch);
         const matchTownship = String(boy.township || '').toLowerCase().includes(cleanSearch);
@@ -646,7 +798,7 @@ export function filterBulkMessageRecipients(boys, options = {}) {
 
 /**
  * Formats a personalized bulk message for a specific Date Boy by substituting
- * {name}, {code}, {city}, and {township} placeholders.
+ * {name}, {code}, {city}, {township}, and {preference} placeholders.
  */
 export function formatBulkMessageForRecipient(templateText, boy, headerTitle = '') {
   if (!templateText || typeof templateText !== 'string') return '';
@@ -655,12 +807,14 @@ export function formatBulkMessageForRecipient(templateText, boy, headerTitle = '
   const name = String(boy?.name || 'Date Boy').trim();
   const city = String(boy?.city || '-').trim();
   const township = String(boy?.township || '-').trim();
+  const prefLabel = formatClientPreferenceShortBadge(boy?.clientPreference);
 
   const body = templateText
     .replace(/\{name\}/gi, name)
     .replace(/\{code\}/gi, boyCode)
     .replace(/\{city\}/gi, city)
     .replace(/\{township\}/gi, township)
+    .replace(/\{preference\}/gi, prefLabel)
     .trim();
 
   const cleanHeader = String(headerTitle || '').trim();

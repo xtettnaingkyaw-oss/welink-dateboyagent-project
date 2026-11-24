@@ -21,6 +21,13 @@ import {
   locationExistsInCatalog,
   paginateLocationItems,
 } from "../src/utils/myanmarLocations.js";
+import {
+  CLIENT_PREFERENCE_OPTIONS,
+  GIRL_ONLY_REMINDER_MESSAGE,
+  normalizeClientPreference,
+  formatClientPreferenceLabel,
+  formatClientPreferenceShortBadge,
+} from "../src/utils/catalogLogic.js";
 
 const firebaseConfig = {
   apiKey: process.env.VITE_FIREBASE_API_KEY,
@@ -578,6 +585,31 @@ function buildTownshipDropdownKeyboard(townships, page = 0) {
   return { inline_keyboard, pageData };
 }
 
+function buildClientPreferenceKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: "🌟 နှစ်ခုလုံး (Girl & LGBT နှစ်မျိုးလုံး အဆင်ပြေသည်)",
+          callback_data: "REGPREF_BOTH",
+        },
+      ],
+      [
+        {
+          text: "🏳️‍🌈 LGBT Only (LGBT သီးသန့်သာ လိုက်မည်)",
+          callback_data: "REGPREF_LGBT",
+        },
+      ],
+      [
+        {
+          text: "👩 Girl Only (အမျိုးသမီး သီးသန့်သာ လိုက်မည်)",
+          callback_data: "REGPREF_GIRL",
+        },
+      ],
+    ],
+  };
+}
+
 /**
  * Verifies that a file exists on Telegram and is within the 20MB Bot API limit,
  * returning a permanent proxy URL backed by file_id so it NEVER expires after 1 hour.
@@ -932,8 +964,9 @@ async function sendDateBoyCard(chatId, boy, boyId, baseUrl = "") {
     fileIds: pFileIds,
   });
   const publicDisplay = publicLinksText ? `\n\n📸 <b>Public ပုံများ:</b> ${publicLinksText}` : "";
+  const prefBadge = formatClientPreferenceShortBadge(boy.clientPreference);
 
-  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || "N/A")}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicDisplay}`;
+  const caption = `👤 <b>Code:</b> ${boyCode}\n🎂 <b>အသက်:</b> ${escapeHTML(boy.age)} နှစ်\n📏 <b>အရပ်:</b> ${escapeHTML(boy.height)}\n🍆 <b>Size:</b> ${escapeHTML(boy.cockSize || "N/A")}\n🎯 <b>လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(prefBadge)}\n📍 <b>နေရာ:</b> ${escapeHTML(boy.township)}, ${escapeHTML(boy.city)}${publicDisplay}`;
   const keyboard = {
     inline_keyboard: [
       [{ text: "🔒 Private ပုံ ကြည့်ရန်", callback_data: `REQ_P_${boyId}` }],
@@ -1009,6 +1042,9 @@ export default async function handler(req, res) {
       const boyPhone = reqBody.boyPhone || boyData.phone || "-";
       const boyCity = reqBody.boyCity || boyData.city || "-";
       const boyTownship = reqBody.boyTownship || boyData.township || "-";
+      const boyClientPref = formatClientPreferenceLabel(
+        reqBody.boyClientPreference || boyData.clientPreference
+      );
       const adminUsername = reqBody.adminUsername || "Web Admin";
 
       const targetChatId =
@@ -1047,6 +1083,7 @@ export default async function handler(req, res) {
           `🆔 <b>Code:</b> ${boyCode}\n` +
           `👤 <b>အမည်:</b> ${escapeHTML(boyName)}\n` +
           `🎂 <b>အသက်:</b> ${escapeHTML(boyAge)} နှစ် | 📏 <b>အရပ်:</b> ${escapeHTML(boyHeight)} | 🍆 <b>Size:</b> ${escapeHTML(boyCockSize)}\n` +
+          `🎯 <b>လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyClientPref)}\n` +
           `📞 <b>ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
           `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
           `🛡️ <b>စစ်ဆေးသူ:</b> ${escapeHTML(adminUsername)}\n` +
@@ -1186,6 +1223,9 @@ export default async function handler(req, res) {
         const customLocNotice = reqBody.isCustomLocationRequest
           ? `\n\n📍 <b>မြို့/မြို့နယ်အသစ် Request ပါဝင်ပါသည်:</b> ${escapeHTML(boyData.township)}, ${escapeHTML(boyData.city)}\n<i>(Admin Panel -> Locations Tab တွင် သို့မဟုတ် အောက်ပါခလုတ်ဖြင့် အတည်ပြုနိုင်ပါသည်)</i>`
           : "";
+        const prefLabel = formatClientPreferenceLabel(
+          boyData.clientPreference || reqBody.clientPreference
+        );
 
         const adminMsg =
           `🚨 <b>New Date Boy Registration (Website) — ${boyCode}</b> 🚨\n\n` +
@@ -1193,6 +1233,7 @@ export default async function handler(req, res) {
           `👤 <b>အမည်:</b> ${escapeHTML(boyData.name)}\n` +
           `🎂 <b>အသက်:</b> ${escapeHTML(boyData.age)} နှစ်\n` +
           `📏 <b>အရပ်:</b> ${escapeHTML(boyData.height)} | 🍆 <b>Size:</b> ${escapeHTML(boyData.cockSize || "N/A")}\n` +
+          `🎯 <b>လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(prefLabel)}\n` +
           `📞 <b>ဖုန်း:</b> ${escapeHTML(boyData.phone)}\n` +
           `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyData.township)}, ${escapeHTML(boyData.city)}\n` +
           `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(boyData.address)}\n\n` +
@@ -1852,6 +1893,7 @@ export default async function handler(req, res) {
           `👤 <b>အမည်:</b> ${escapeHTML(foundBoy.name)}\n` +
           `🎂 <b>အသက်:</b> ${escapeHTML(foundBoy.age)} နှစ်\n` +
           `📏 <b>အရပ်:</b> ${escapeHTML(foundBoy.height)} | 🍆 <b>Size:</b> ${escapeHTML(foundBoy.cockSize || "N/A")}\n` +
+          `🎯 <b>လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(formatClientPreferenceLabel(foundBoy.clientPreference))}\n` +
           `📞 <b>ဖုန်း:</b> ${escapeHTML(foundBoy.phone)}\n` +
           `📍 <b>မြို့နယ်:</b> ${escapeHTML(foundBoy.township)}, ${escapeHTML(foundBoy.city)}\n` +
           `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(foundBoy.address)}\n\n` +
@@ -2576,10 +2618,123 @@ export default async function handler(req, res) {
     if (currentState.step === "GET_COCK_SIZE" && text) {
       await setDoc(
         stateRef,
-        { step: "GET_PHONE", data: { ...currentState.data, cockSize: text } },
+        { step: "GET_CLIENT_PREFERENCE", data: { ...currentState.data, cockSize: text } },
         { merge: true }
       );
-      await sendMessage(chatId, "📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် <b>ဖုန်းနံပါတ်</b> ကို ရိုက်ထည့်ပေးပါ:");
+      await sendMessage(
+        chatId,
+        "🎯 <b>လက်ခံလိုသော ဧည့်သည်အမျိုးအစား (Client Preference) ရွေးချယ်ရန်</b>\n\nGirl Only ပဲ လိုက်ချင်တာလား၊ LGBT Only ပဲ လိုက်ချင်တာလား၊ နှစ်ခုလုံး ဘာဖြစ်ဖြစ် အဆင်ပြေတာလားဆိုတာ အောက်ပါခလုတ်များထဲမှ တစ်ခုကို ရွေးချယ်ပေးပါ -\n\n<i>💡 မှတ်ချက် - <b>Girl Only</b> သီးသန့်ရွေးချယ်ပါက ဧည့်သည်ရရှိမှု နည်းပါးနိုင်ပါသည်။</i>",
+        buildClientPreferenceKeyboard()
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (currentState.step === "GET_CLIENT_PREFERENCE" && text) {
+      if (text === "REGPREF_GIRL") {
+        await setDoc(
+          stateRef,
+          {
+            step: "CONFIRM_GIRL_ONLY_PREF",
+            data: { ...currentState.data, clientPreference: "girl_only" },
+          },
+          { merge: true }
+        );
+        await editOrSendMessage(
+          chatId,
+          callbackMessageId,
+          `⚠️ <b>အထူးသတိပေးချက် (Girl Only ရွေးချယ်ထားသူများအတွက်)</b>\n\n${escapeHTML(GIRL_ONLY_REMINDER_MESSAGE)}\n\nသိရှိနားလည်ပြီး Girl Only ဖြင့်သာ ဆက်လက်လျှောက်ထားလိုပါသလား (သို့မဟုတ်) နှစ်ခုလုံးသို့ ပြောင်းရွေးလိုပါသလား?`,
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: "🌟 နှစ်ခုလုံး (Girl & LGBT အဆင်ပြေသည်) သို့ ပြောင်းရွေးမည်",
+                  callback_data: "REGPREF_BOTH",
+                },
+              ],
+              [
+                {
+                  text: "✅ သိရှိပါသည် — Girl Only ဖြင့်သာ ဆက်လျှောက်မည်",
+                  callback_data: "REGPREF_GIRL_CONFIRM",
+                },
+              ],
+              [
+                {
+                  text: "🏳️‍🌈 LGBT Only သို့ ပြောင်းရွေးမည်",
+                  callback_data: "REGPREF_LGBT",
+                },
+              ],
+            ],
+          }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text === "REGPREF_BOTH" || text === "REGPREF_LGBT") {
+        const chosenPref = text === "REGPREF_LGBT" ? "lgbt_only" : "both";
+        const chosenLabel = formatClientPreferenceLabel(chosenPref);
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_PHONE",
+            data: { ...currentState.data, clientPreference: chosenPref },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✅ ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစား: <b>${escapeHTML(chosenLabel)}</b>\n\n📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် <b>ဖုန်းနံပါတ်</b> ကို ရိုက်ထည့်ပေးပါ:`
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ အောက်ပါ <b>ဧည့်သည်အမျိုးအစား ခလုတ် (၃) ခု</b> ထဲမှ တစ်ခုကို နှိပ်၍ ရွေးချယ်ပေးပါ -",
+        buildClientPreferenceKeyboard()
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (currentState.step === "CONFIRM_GIRL_ONLY_PREF" && text) {
+      if (text === "REGPREF_GIRL_CONFIRM") {
+        const chosenLabel = formatClientPreferenceLabel("girl_only");
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_PHONE",
+            data: { ...currentState.data, clientPreference: "girl_only" },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✅ ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစား: <b>${escapeHTML(chosenLabel)}</b>\n<i>(ဧည့်သည်ရရှိမှု နည်းပါးနိုင်ကြောင်း သတိပေးချက်ကို သိရှိအတည်ပြုပြီးဖြစ်ပါသည်)</i>\n\n📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် <b>ဖုန်းနံပါတ်</b> ကို ရိုက်ထည့်ပေးပါ:`
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      if (text === "REGPREF_BOTH" || text === "REGPREF_LGBT") {
+        const chosenPref = text === "REGPREF_LGBT" ? "lgbt_only" : "both";
+        const chosenLabel = formatClientPreferenceLabel(chosenPref);
+        await setDoc(
+          stateRef,
+          {
+            step: "GET_PHONE",
+            data: { ...currentState.data, clientPreference: chosenPref },
+          },
+          { merge: true }
+        );
+        await sendMessage(
+          chatId,
+          `✅ ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစား: <b>${escapeHTML(chosenLabel)}</b>\n\n📞 ကျေးဇူးပြု၍ ဆက်သွယ်ရန် <b>ဖုန်းနံပါတ်</b> ကို ရိုက်ထည့်ပေးပါ:`
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ အထက်ပါ ခလုတ်များထဲမှ တစ်ခုကို နှိပ်၍ အတည်ပြုပေးပါ။"
+      );
       return res.status(200).json({ status: "success" });
     }
     if (currentState.step === "GET_PHONE" && text) {
@@ -3057,11 +3212,13 @@ export default async function handler(req, res) {
         }
       }
 
+      const finalClientPreference = normalizeClientPreference(applicantData.clientPreference);
       const finalData = {
         name: applicantData.name,
         age: applicantData.age,
         height: applicantData.height,
         cockSize: applicantData.cockSize,
+        clientPreference: finalClientPreference,
         phone: applicantData.phone,
         city: applicantData.city,
         township: applicantData.township,
@@ -3095,6 +3252,7 @@ export default async function handler(req, res) {
           fileIds: finalData.privateFileIds,
         });
         const videoLink = buildVideoLinkHtml(finalData, docRef.id, baseUrl);
+        const prefLabel = formatClientPreferenceLabel(finalClientPreference);
 
         const adminMsg =
           `🚨 <b>New Date Boy Registration (${boyCode})</b> 🚨\n\n` +
@@ -3102,6 +3260,7 @@ export default async function handler(req, res) {
           `👤 <b>အမည်:</b> ${escapeHTML(finalData.name)}\n` +
           `🎂 <b>အသက်:</b> ${escapeHTML(finalData.age)} နှစ်\n` +
           `📏 <b>အရပ်:</b> ${escapeHTML(finalData.height)} | 🍆 <b>Size:</b> ${escapeHTML(finalData.cockSize)}\n` +
+          `🎯 <b>လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(prefLabel)}\n` +
           `📞 <b>ဖုန်း:</b> ${escapeHTML(finalData.phone)}\n` +
           `📍 <b>မြို့နယ်:</b> ${escapeHTML(finalData.township)}, ${escapeHTML(finalData.city)}\n` +
           `🏠 <b>လိပ်စာ အသေးစိတ်:</b> ${escapeHTML(finalData.address)}\n\n` +
