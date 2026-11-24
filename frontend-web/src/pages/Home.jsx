@@ -15,6 +15,7 @@ import {
   RotateCcw,
   ChevronRight,
   Lock,
+  AlertCircle,
 } from 'lucide-react';
 import { db } from '../config/firebase';
 import { collection, doc, getDoc, getDocs, query, where, addDoc, serverTimestamp } from 'firebase/firestore';
@@ -27,6 +28,10 @@ import {
   filterAndSortCompanions,
   formatBookingSummary,
   formatClientPreferenceShortBadge,
+  BOOKING_CLIENT_TYPE_OPTIONS,
+  formatBookingClientTypeLabel,
+  formatBookingClientTypeShortBadge,
+  checkClientTypeCompatibility,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -67,7 +72,9 @@ export default function Home() {
   const [submittingBooking, setSubmittingBooking] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [bookingRef, setBookingRef] = useState('');
+  const [bookingError, setBookingError] = useState('');
   const [bookingForm, setBookingForm] = useState({
+    clientType: '',
     clientName: '',
     clientContact: '',
     preferredDate: '',
@@ -202,29 +209,45 @@ export default function Home() {
     setActivePhotoIndex(0);
     setBookingStep(initialStep);
     setCopiedCode(false);
+    setBookingError('');
   };
 
   const closeBoyModal = () => {
     setSelectedBoy(null);
     setBookingStep('profile');
+    setBookingError('');
   };
 
   const handleBookingSubmit = async (e) => {
     e.preventDefault();
     if (!selectedBoy) return;
+
+    const compat = checkClientTypeCompatibility(
+      bookingForm.clientType,
+      selectedBoy.clientPreference
+    );
+    if (!compat.compatible) {
+      setBookingError(compat.warning);
+      return;
+    }
+
+    setBookingError('');
     setSubmittingBooking(true);
 
     const generatedRef = `WL-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
 
     try {
-      await addDoc(collection(db, 'bookings'), {
+      const bookingDocRef = await addDoc(collection(db, 'bookings'), {
         bookingRef: generatedRef,
+        source: 'website',
         dateBoyId: selectedBoy.id,
         dateBoyCode: selectedBoy.boyCode,
         dateBoyName: selectedBoy.name || '',
         dateBoyCity: selectedBoy.city || '',
         dateBoyTownship: selectedBoy.township || '',
+        dateBoyPreference: selectedBoy.clientPreference || 'both',
         ...bookingForm,
+        clientType: compat.normalizedClientType,
         status: 'pending',
         createdAt: serverTimestamp(),
       });
@@ -234,13 +257,16 @@ export default function Home() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           internal_action: 'web_new_booking',
+          bookingId: bookingDocRef.id,
           bookingRef: generatedRef,
           dateBoyId: selectedBoy.id,
           dateBoyCode: selectedBoy.boyCode,
           dateBoyName: selectedBoy.name || '',
           dateBoyCity: selectedBoy.city || '',
           dateBoyTownship: selectedBoy.township || '',
+          dateBoyPreference: selectedBoy.clientPreference || 'both',
           ...bookingForm,
+          clientType: compat.normalizedClientType,
         }),
       }).catch((e) => console.error('Admin booking notification error:', e));
     } catch (err) {
@@ -976,7 +1002,7 @@ export default function Home() {
 
               {bookingStep === 'form' && (
                 <form onSubmit={handleBookingSubmit} className="space-y-5">
-                  <div className="flex items-center justify-between p-4 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="flex flex-wrap items-center justify-between gap-3 p-4 rounded-xl bg-slate-50 border border-slate-200">
                     <div className="flex items-center gap-3.5">
                       <img
                         src={selectedBoy.primaryPhoto || FALLBACK_PORTRAITS[0]}
@@ -999,7 +1025,99 @@ export default function Home() {
                         </p>
                       </div>
                     </div>
+                    <div className="px-3 py-1.5 rounded-lg bg-amber-50 border border-amber-200 text-amber-900 text-xs font-semibold">
+                      🎯 လက်ခံသော ဧည့်သည်:{' '}
+                      {selectedBoy.clientPreferenceShort ||
+                        formatClientPreferenceShortBadge(selectedBoy.clientPreference)}
+                    </div>
                   </div>
+
+                  {/* Step 1: Mandatory Client Type (Girl or LGBT) Declaration */}
+                  <div className="p-4 rounded-xl bg-slate-950 text-white border border-slate-800 space-y-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <span className="font-mono text-[11px] text-amber-400 font-semibold tracking-wider uppercase block">
+                          STEP 01 · CLIENT IDENTITY DECLARATION
+                        </span>
+                        <h5 className="text-xs sm:text-sm font-bold text-white mt-0.5">
+                          သင်သည် မည်သည့် ဧည့်သည်အမျိုးအစား (Girl သို့မဟုတ် LGBT) ဖြစ်ပါသလဲ? *
+                        </h5>
+                      </div>
+                      <span className="text-[11px] text-slate-400">
+                        Admin နှင့် Date Boy ထံသို့ တစ်ပါတည်း အသိပေးပို့ဆောင်ပေးပါမည်
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      {BOOKING_CLIENT_TYPE_OPTIONS.map((opt) => {
+                        const isSelected = bookingForm.clientType === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            onClick={() => {
+                              setBookingForm({ ...bookingForm, clientType: opt.id });
+                              setBookingError('');
+                            }}
+                            className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer flex items-start justify-between gap-2 ${
+                              isSelected
+                                ? 'bg-amber-400/15 border-amber-400 text-white shadow-sm'
+                                : 'bg-slate-900/90 border-slate-800 text-slate-300 hover:border-slate-700'
+                            }`}
+                          >
+                            <div>
+                              <p className="text-xs sm:text-sm font-bold text-white">{opt.label}</p>
+                              <p className="text-[11px] text-slate-300 mt-1">{opt.desc}</p>
+                            </div>
+                            <span
+                              className={`w-5 h-5 rounded-full border flex items-center justify-center shrink-0 mt-0.5 ${
+                                isSelected
+                                  ? 'bg-amber-400 border-amber-400 text-slate-950'
+                                  : 'border-slate-600'
+                              }`}
+                            >
+                              {isSelected && <Check size={12} strokeWidth={3} />}
+                            </span>
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {bookingForm.clientType && (() => {
+                      const compat = checkClientTypeCompatibility(
+                        bookingForm.clientType,
+                        selectedBoy.clientPreference
+                      );
+                      if (!compat.compatible) {
+                        return (
+                          <div className="p-3 rounded-lg bg-rose-950/90 border border-rose-500/70 text-rose-200 text-xs flex items-start gap-2 leading-relaxed">
+                            <AlertCircle size={16} className="text-rose-400 shrink-0 mt-0.5" />
+                            <span>{compat.warning}</span>
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="p-2.5 rounded-lg bg-emerald-950/80 border border-emerald-500/50 text-emerald-200 text-xs flex items-center gap-2">
+                          <CheckCircle2 size={15} className="text-emerald-400 shrink-0" />
+                          <span>
+                            ✅ ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစား (
+                            <strong>{formatBookingClientTypeShortBadge(bookingForm.clientType)}</strong>
+                            ) ကို Admin နှင့် Date Boy ({selectedBoy.name}) ထံသို့ တစ်ခါတည်း ပူးတွဲပြသပေးပါမည်။
+                          </span>
+                        </div>
+                      );
+                    })()}
+                  </div>
+
+                  {bookingError && (
+                    <div
+                      role="alert"
+                      className="p-3.5 rounded-xl bg-rose-50 border border-rose-200 text-rose-800 text-xs font-semibold flex items-start gap-2.5"
+                    >
+                      <AlertCircle size={16} className="text-rose-600 shrink-0 mt-0.5" />
+                      <span>{bookingError}</span>
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                     <div>
@@ -1185,6 +1303,12 @@ export default function Home() {
                       <span className="text-slate-500">Companion:</span>
                       <span className="font-semibold text-slate-900">
                         {selectedBoy.name} ({selectedBoy.boyCode})
+                      </span>
+                    </div>
+                    <div className="flex justify-between">
+                      <span className="text-slate-500">Client Type (ဧည့်သည်):</span>
+                      <span className="font-bold text-amber-700">
+                        {formatBookingClientTypeLabel(bookingForm.clientType)}
                       </span>
                     </div>
                     <div className="flex justify-between">

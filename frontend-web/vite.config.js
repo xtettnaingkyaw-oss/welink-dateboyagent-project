@@ -58,9 +58,17 @@ function vercelApiDevPlugin() {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
   Object.assign(process.env, env);
+  const isAIStudioSandbox = process.cwd().startsWith('/app/applet');
 
   return {
     plugins: [react(), vercelApiDevPlugin()],
+    cacheDir: isAIStudioSandbox ? '../node_modules/.vite' : 'node_modules/.vite',
+    build: isAIStudioSandbox
+      ? {
+          outDir: '../dist',
+          emptyOutDir: true,
+        }
+      : undefined,
     server: {
       port: 3000,
       host: '0.0.0.0',

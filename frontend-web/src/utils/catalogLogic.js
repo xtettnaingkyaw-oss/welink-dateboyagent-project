@@ -204,6 +204,107 @@ export function matchesClientPreferenceFilter(boyPref, filterValue = 'all') {
   return norm === filterValue;
 }
 
+export const BOOKING_CLIENT_TYPE_OPTIONS = [
+  {
+    id: 'girl',
+    label: '👩 Girl (အမျိုးသမီး ဧည့်သည်)',
+    shortLabel: '👩 Girl ဧည့်သည်',
+    botButtonText: '👩 Girl (အမျိုးသမီး ဧည့်သည်)',
+    desc: 'အမျိုးသမီး ဧည့်သည်အနေဖြင့် Date Boy ခေါ်ယူမည်',
+  },
+  {
+    id: 'lgbt',
+    label: '🏳️‍🌈 LGBT (LGBT ဧည့်သည်)',
+    shortLabel: '🏳️‍🌈 LGBT ဧည့်သည်',
+    botButtonText: '🏳️‍🌈 LGBT (LGBT ဧည့်သည်)',
+    desc: 'LGBT ဧည့်သည်အနေဖြင့် Date Boy ခေါ်ယူမည်',
+  },
+];
+
+/**
+ * Normalizes a client's declared identity type ('girl' | 'lgbt' | '') when placing a Dating Request.
+ */
+export function normalizeBookingClientType(rawType) {
+  if (!rawType || typeof rawType !== 'string') return '';
+  const clean = rawType.trim().toLowerCase();
+  if (
+    clean === 'girl' ||
+    clean === 'g' ||
+    clean === 'female' ||
+    clean === 'woman' ||
+    clean.includes('girl') ||
+    clean.includes('အမျိုးသမီး')
+  ) {
+    return 'girl';
+  }
+  if (clean === 'lgbt' || clean === 'l' || clean.includes('lgbt') || clean.includes('gay')) {
+    return 'lgbt';
+  }
+  return '';
+}
+
+/**
+ * Formats a full human-readable label for a client's declared type ('👩 Girl (အမျိုးသမီး ဧည့်သည်)' | '🏳️‍🌈 LGBT (LGBT ဧည့်သည်)').
+ */
+export function formatBookingClientTypeLabel(rawType) {
+  const norm = normalizeBookingClientType(rawType);
+  const found = BOOKING_CLIENT_TYPE_OPTIONS.find((o) => o.id === norm);
+  return found ? found.label : 'မဖော်ပြထားပါ (Unspecified)';
+}
+
+/**
+ * Formats a short badge for a client's declared type ('👩 Girl ဧည့်သည်' | '🏳️‍🌈 LGBT ဧည့်သည်').
+ */
+export function formatBookingClientTypeShortBadge(rawType) {
+  const norm = normalizeBookingClientType(rawType);
+  const found = BOOKING_CLIENT_TYPE_OPTIONS.find((o) => o.id === norm);
+  return found ? found.shortLabel : 'ဧည့်သည် (Unspecified)';
+}
+
+/**
+ * Checks if a Client's declared type ('girl' | 'lgbt') is compatible with a Date Boy's clientPreference ('both' | 'girl_only' | 'lgbt_only').
+ */
+export function checkClientTypeCompatibility(clientType, boyClientPreference) {
+  const normClient = normalizeBookingClientType(clientType);
+  const normBoyPref = normalizeClientPreference(boyClientPreference);
+
+  if (!normClient) {
+    return {
+      compatible: false,
+      normalizedClientType: '',
+      normalizedBoyPreference: normBoyPref,
+      warning: 'ကျေးဇူးပြု၍ သင်သည် Girl (အမျိုးသမီး ဧည့်သည်) သို့မဟုတ် LGBT ဧည့်သည် ဖြစ်ကြောင်း အရင်ဆုံး ရွေးချယ်အသိပေးပါ။',
+    };
+  }
+
+  if (normClient === 'lgbt' && normBoyPref === 'girl_only') {
+    return {
+      compatible: false,
+      normalizedClientType: normClient,
+      normalizedBoyPreference: normBoyPref,
+      warning:
+        '⚠️ ဤ Date Boy သည် "Girl Only (အမျိုးသမီး သီးသန့်)" သာ လက်ခံမည်ဟု သတ်မှတ်ထားပါသည်။ LGBT ဧည့်သည်များအနေဖြင့် "နှစ်ခုလုံး (Girl & LGBT)" သို့မဟုတ် "LGBT Only" လက်ခံသော Date Boy ကို ရွေးချယ်ပေးပါ။',
+    };
+  }
+
+  if (normClient === 'girl' && normBoyPref === 'lgbt_only') {
+    return {
+      compatible: false,
+      normalizedClientType: normClient,
+      normalizedBoyPreference: normBoyPref,
+      warning:
+        '⚠️ ဤ Date Boy သည် "LGBT Only (LGBT သီးသန့်)" သာ လက်ခံမည်ဟု သတ်မှတ်ထားပါသည်။ အမျိုးသမီး ဧည့်သည်များအနေဖြင့် "နှစ်ခုလုံး (Girl & LGBT)" သို့မဟုတ် "Girl Only" လက်ခံသော Date Boy ကို ရွေးချယ်ပေးပါ။',
+    };
+  }
+
+  return {
+    compatible: true,
+    normalizedClientType: normClient,
+    normalizedBoyPreference: normBoyPref,
+    warning: null,
+  };
+}
+
 /**
  * Normalizes a companion document from Firestore (supporting both legacy `publicPhoto`,
  * multi-photo `publicPhotos` arrays, and permanent `publicFileIds`/`privateFileIds` from Telegram Bot).
@@ -461,6 +562,9 @@ export function formatBookingSummary({ bookingRef, boy, bookingForm }) {
   if (!boy || !bookingForm) return '';
   const code = boy.boyCode || `WLDB-${String(boy.id || '').substring(0, 5).toUpperCase()}`;
   const prefLabel = formatClientPreferenceShortBadge(boy.clientPreference);
+  const clientTypeLine = bookingForm.clientType
+    ? `Client Type: ${formatBookingClientTypeLabel(bookingForm.clientType)}`
+    : null;
   return [
     'WE LINK — PRIVATE CONCIERGE RESERVATION',
     `Reference: ${bookingRef}`,
@@ -468,6 +572,7 @@ export function formatBookingSummary({ bookingRef, boy, bookingForm }) {
     `Preference: ${prefLabel}`,
     `Location: ${boy.township}, ${boy.city}`,
     `Client: ${bookingForm.clientName}`,
+    ...(clientTypeLine ? [clientTypeLine] : []),
     `Contact: ${bookingForm.clientContact}`,
     `Schedule: ${bookingForm.preferredDate} at ${bookingForm.preferredTime}`,
     `Arrangement: ${bookingForm.duration}`,

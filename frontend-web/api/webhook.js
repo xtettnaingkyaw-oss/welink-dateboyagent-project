@@ -610,6 +610,246 @@ function buildClientPreferenceKeyboard() {
   };
 }
 
+function normalizeBookingClientType(rawType) {
+  if (!rawType || typeof rawType !== "string") return "";
+  const clean = rawType.trim().toLowerCase();
+  if (
+    clean === "girl" ||
+    clean === "g" ||
+    clean === "female" ||
+    clean.includes("girl") ||
+    clean.includes("အမျိုးသမီး")
+  ) {
+    return "girl";
+  }
+  if (clean === "lgbt" || clean === "l" || clean.includes("lgbt") || clean.includes("gay")) {
+    return "lgbt";
+  }
+  return "";
+}
+
+function formatBookingClientTypeLabel(rawType) {
+  const norm = normalizeBookingClientType(rawType);
+  if (norm === "girl") return "👩 Girl (အမျိုးသမီး ဧည့်သည်)";
+  if (norm === "lgbt") return "🏳️‍🌈 LGBT (LGBT ဧည့်သည်)";
+  return "မဖော်ပြထားပါ (Unspecified)";
+}
+
+function formatBookingClientTypeShortBadge(rawType) {
+  const norm = normalizeBookingClientType(rawType);
+  if (norm === "girl") return "👩 Girl ဧည့်သည်";
+  if (norm === "lgbt") return "🏳️‍🌈 LGBT ဧည့်သည်";
+  return "ဧည့်သည်";
+}
+
+function isClientTypeCompatibleWithBoy(clientType, boyClientPreference) {
+  const normClient = normalizeBookingClientType(clientType);
+  const normBoyPref = normalizeClientPreference(boyClientPreference);
+  if (!normClient) return true;
+  if (normClient === "lgbt" && normBoyPref === "girl_only") return false;
+  if (normClient === "girl" && normBoyPref === "lgbt_only") return false;
+  return true;
+}
+
+/**
+ * Handles approving or rejecting a Dating Request (Booking) from either Telegram Bot or Web Admin Panel,
+ * notifying:
+ *  1) The Date Boy (with the Client's Type: Girl or LGBT, Booking Ref, Schedule, Package, Notes)
+ *  2) The Client (if Telegram Chat ID is available)
+ *  3) The Admin Telegram Bot (confirmation + direct chat links)
+ */
+async function approveOrRejectDatingBooking({
+  bookingId = "",
+  clientChatId = "",
+  boyId = "",
+  clientType = "",
+  isApprove = true,
+  adminActor = "Admin",
+  notifyAdminChatId = null,
+}) {
+  let bookingData = {};
+  if (bookingId) {
+    try {
+      const bkSnap = await getDoc(doc(db, "bookings", String(bookingId)));
+      if (bkSnap.exists()) {
+        bookingData = bkSnap.data() || {};
+      }
+    } catch (e) {
+      console.error("Error reading booking doc:", e);
+    }
+  }
+
+  const resolvedBoyId = String(boyId || bookingData.dateBoyId || "").trim();
+  const resolvedClientChatId = String(clientChatId || bookingData.clientChatId || "").trim();
+  const resolvedClientType = normalizeBookingClientType(
+    clientType || bookingData.clientType || ""
+  );
+  const clientTypeLabel = formatBookingClientTypeLabel(resolvedClientType);
+  const clientTypeShort = formatBookingClientTypeShortBadge(resolvedClientType);
+
+  let boyData = {};
+  if (resolvedBoyId) {
+    try {
+      const boySnap = await getDoc(doc(db, "dateboys", resolvedBoyId));
+      if (boySnap.exists()) {
+        boyData = boySnap.data() || {};
+      }
+    } catch (e) {
+      console.error("Error reading boy doc for booking:", e);
+    }
+  }
+
+  const boyCode =
+    bookingData.dateBoyCode ||
+    (resolvedBoyId ? `WLDB-${resolvedBoyId.substring(0, 5).toUpperCase()}` : "WLDB-XXXXX");
+  const boyName = boyData.name || bookingData.dateBoyName || "Date Boy";
+  const boyCity = boyData.city || bookingData.dateBoyCity || "-";
+  const boyTownship = boyData.township || bookingData.dateBoyTownship || "-";
+  const boyPhone = boyData.phone || "-";
+  const boyPrefLabel = formatClientPreferenceLabel(
+    boyData.clientPreference || bookingData.dateBoyPreference
+  );
+
+  const boyChatId =
+    boyData.telegramChatId ||
+    bookingData.dateBoyChatId ||
+    (typeof boyData.telegramProfileLink === "string"
+      ? boyData.telegramProfileLink.match(/id=(\d+)/)?.[1]
+      : null);
+  const boyProfileLink =
+    boyData.telegramProfileLink || (boyChatId ? `tg://user?id=${boyChatId}` : "");
+
+  const bookingRef =
+    bookingData.bookingRef ||
+    `WL-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+  const clientName = bookingData.clientName || "Telegram Client";
+  const clientContact =
+    bookingData.clientContact ||
+    (resolvedClientChatId ? `tg://user?id=${resolvedClientChatId}` : "-");
+  const clientProfileLink =
+    bookingData.clientProfileLink ||
+    (resolvedClientChatId && resolvedClientChatId !== "0"
+      ? `tg://user?id=${resolvedClientChatId}`
+      : "");
+  const scheduleInfo =
+    bookingData.preferredDate || bookingData.preferredTime
+      ? `${bookingData.preferredDate || ""} ${bookingData.preferredTime ? "· " + bookingData.preferredTime : ""}`.trim()
+      : "Admin မှ ဆက်သွယ်ညှိနှိုင်းပေးပါမည်";
+  const durationInfo = bookingData.duration || "Standard Arrangement";
+  const notesInfo = bookingData.notes || "-";
+
+  if (bookingId) {
+    try {
+      await updateDoc(doc(db, "bookings", String(bookingId)), {
+        status: isApprove ? "confirmed" : "rejected",
+        ...(resolvedClientType ? { clientType: resolvedClientType } : {}),
+        updatedAt: serverTimestamp(),
+        processedBy: adminActor,
+      });
+    } catch (e) {
+      console.error("Failed to update booking doc status:", e);
+    }
+  }
+
+  let dateBoyNotified = false;
+  let clientNotified = false;
+  let adminNotified = false;
+
+  if (isApprove) {
+    // 1. Notify the Date Boy via Telegram Bot with the Client Type (Girl or LGBT)!
+    if (boyChatId && String(boyChatId) !== "0") {
+      const boyNoticeMsg =
+        `🎉 <b>Dating Request အသစ် ရရှိပါပြီ! (WE LINK Admin Approved)</b> 🎉\n\n` +
+        `မင်္ဂလာပါ <b>${escapeHTML(boyName)} (${escapeHTML(boyCode)})</b> ခင်ဗျာ — သင့်အား ဧည့်သည်တစ်ဦးမှ ခေါ်ယူရန် Admin မှ အတည်ပြုပေးလိုက်ပါပြီ!\n\n` +
+        `🔖 <b>Booking Ref:</b> <code>${escapeHTML(bookingRef)}</code>\n` +
+        `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+        `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
+        `📅 <b>ရက်စွဲ / အချိန်:</b> ${escapeHTML(scheduleInfo)}\n` +
+        `🕒 <b>Package:</b> ${escapeHTML(durationInfo)}\n` +
+        `📝 <b>မှတ်ချက်:</b> ${escapeHTML(notesInfo)}\n\n` +
+        `📞 <i>တွေ့ဆုံရမည့် နေရာနှင့် အချိန်အသေးစိတ်ကို WE LINK Admin မှ တိုက်ရိုက်ဆက်သွယ် ချိတ်ဆက်ပေးပါမည်။ အဆင်သင့်ပြင်ဆင်ထားပေးပါ ခင်ဗျာ။</i>`;
+
+      const boySendRes = await sendMessage(boyChatId, boyNoticeMsg, MAIN_MENU_KEYBOARD);
+      dateBoyNotified = Boolean(boySendRes?.ok);
+    }
+
+    // 2. Notify the Client via Telegram Bot (if clientChatId exists)
+    if (resolvedClientChatId && resolvedClientChatId !== "0") {
+      const clientApproveMsg =
+        `✅ <b>ငွေပေးချေမှုနှင့် Dating Request အတည်ပြုပြီးပါပြီ! (${escapeHTML(bookingRef)})</b> 🎉\n\n` +
+        `👤 <b>Date Boy:</b> <b>${escapeHTML(boyCode)}</b>\n` +
+        `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+        `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+        `✅ သက်ဆိုင်ရာ Date Boy (<b>${escapeHTML(boyCode)}</b>) ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့်တကွ အကြောင်းကြားပြီး ဖြစ်ပါသည်။ Admin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`;
+      const clientSendRes = await sendMessage(
+        resolvedClientChatId,
+        clientApproveMsg,
+        MAIN_MENU_KEYBOARD
+      );
+      clientNotified = Boolean(clientSendRes?.ok);
+    }
+
+    // 3. Notify Admin Telegram Bot
+    const targetAdminChat = notifyAdminChatId || (await getAdminChatId());
+    if (targetAdminChat) {
+      const boyNotiStatus = dateBoyNotified
+        ? `✅ Date Boy (<b>${escapeHTML(boyName)}</b>) ၏ Telegram သို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့်တကွ အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ။`
+        : `⚠️ Date Boy (<b>${escapeHTML(boyName)}</b>) ထံသို့ Telegram Bot မှ တိုက်ရိုက်ပို့မရပါ (Website လျှောက်လွှာ သို့မဟုတ် Chat ID မရှိပါ — ဖုန်း <b>${escapeHTML(boyPhone)}</b> သို့ ဆက်သွယ်ပေးပါ)။`;
+
+      const clientLinkHtml = clientProfileLink
+        ? `\n🔗 <b>Client Telegram:</b> <a href="${clientProfileLink}">💬 Client နှင့် တိုက်ရိုက်စကားပြောရန်</a>`
+        : "";
+      const boyLinkHtml = boyProfileLink
+        ? `\n🔗 <b>Date Boy Telegram:</b> <a href="${boyProfileLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန်</a>`
+        : "";
+
+      const adminConfirmMsg =
+        `✅ <b>Dating Request အတည်ပြုပြီးပါပြီ (${escapeHTML(bookingRef)})</b>\n\n` +
+        `🆔 <b>Date Boy:</b> ${escapeHTML(boyName)} (<b>${escapeHTML(boyCode)}</b>)\n` +
+        `🎯 <b>Date Boy လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyPrefLabel)}\n` +
+        `📞 <b>Date Boy ဖုန်း:</b> ${escapeHTML(boyPhone)}\n` +
+        `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+        `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+        `🧑‍💼 <b>Client အမည်/ဆက်သွယ်ရန်:</b> ${escapeHTML(clientName)} (${escapeHTML(clientContact)})\n` +
+        `📅 <b>ရက်စွဲ/အချိန်:</b> ${escapeHTML(scheduleInfo)}\n` +
+        `🕒 <b>Package:</b> ${escapeHTML(durationInfo)}\n` +
+        `🛡️ <b>အတည်ပြုသူ:</b> ${escapeHTML(adminActor)}` +
+        clientLinkHtml +
+        boyLinkHtml +
+        `\n\n${boyNotiStatus}`;
+
+      const admRes = await sendMessage(targetAdminChat, adminConfirmMsg);
+      adminNotified = Boolean(admRes?.ok);
+    }
+  } else {
+    // Reject flow
+    if (resolvedClientChatId && resolvedClientChatId !== "0") {
+      const rejectClientMsg = `❌ <b>${escapeHTML(boyCode)}</b> အား ခေါ်ယူရန် တောင်းဆိုချက် (${escapeHTML(bookingRef)}) ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ သို့မဟုတ် အချက်အလက် မမှန်ကန်ပါ။`;
+      const cRes = await sendMessage(resolvedClientChatId, rejectClientMsg, MAIN_MENU_KEYBOARD);
+      clientNotified = Boolean(cRes?.ok);
+    }
+    const targetAdminChat = notifyAdminChatId || (await getAdminChatId());
+    if (targetAdminChat) {
+      const admRes = await sendMessage(
+        targetAdminChat,
+        `❌ <b>${escapeHTML(boyCode)} (${escapeHTML(boyName)})</b> အတွက် Dating Request (<b>${escapeHTML(bookingRef)}</b> · ဧည့်သည်: <b>${escapeHTML(clientTypeShort)}</b>) ကို ပယ်ချလိုက်ပါပြီ။`
+      );
+      adminNotified = Boolean(admRes?.ok);
+    }
+  }
+
+  return {
+    bookingRef,
+    boyCode,
+    boyName,
+    clientType: resolvedClientType,
+    clientTypeLabel,
+    dateBoyNotified,
+    clientNotified,
+    adminNotified,
+  };
+}
+
 /**
  * Verifies that a file exists on Telegram and is within the 20MB Bot API limit,
  * returning a permanent proxy URL backed by file_id so it NEVER expires after 1 hour.
@@ -1267,22 +1507,65 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: "notified_admin" });
     }
 
-    // Website / Booking Reservation -> Notify Admin Telegram Bot immediately
+    // Website / Booking Reservation -> Notify Admin Telegram Bot immediately with Client Type & Inline Approve/Reject
     if (reqBody.internal_action === "web_new_booking") {
       const adminChatId = await getAdminChatId();
       if (adminChatId) {
+        const clientTypeLabel = formatBookingClientTypeLabel(reqBody.clientType);
+        const boyPrefLabel = formatClientPreferenceLabel(reqBody.dateBoyPreference);
         const msg =
           `🛎️ <b>New Web Concierge Reservation (${escapeHTML(reqBody.bookingRef || "WL-BOOKING")})</b>\n\n` +
-          `👤 <b>Date Boy:</b> ${escapeHTML(reqBody.dateBoyName)} (${escapeHTML(reqBody.dateBoyCode)})\n` +
-          `📍 <b>မြို့နယ်:</b> ${escapeHTML(reqBody.dateBoyTownship)}, ${escapeHTML(reqBody.dateBoyCity)}\n` +
-          `🧑‍💼 <b>Client အမည်:</b> ${escapeHTML(reqBody.clientName)}\n` +
+          `👤 <b>Date Boy:</b> ${escapeHTML(reqBody.dateBoyName)} (<b>${escapeHTML(reqBody.dateBoyCode)}</b>)\n` +
+          `🎯 <b>Date Boy လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyPrefLabel)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(reqBody.dateBoyTownship)}, ${escapeHTML(reqBody.dateBoyCity)}\n\n` +
+          `🧑‍💼 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+          `👤 <b>Client အမည်:</b> ${escapeHTML(reqBody.clientName)}\n` +
           `📞 <b>ဆက်သွယ်ရန်:</b> ${escapeHTML(reqBody.clientContact)}\n` +
           `📅 <b>ရက်စွဲ/အချိန်:</b> ${escapeHTML(reqBody.preferredDate)} · ${escapeHTML(reqBody.preferredTime)}\n` +
           `🕒 <b>Package:</b> ${escapeHTML(reqBody.duration)}\n` +
-          `📝 <b>မှတ်ချက်:</b> ${escapeHTML(reqBody.notes || "-")}`;
-        await sendMessage(adminChatId, msg);
+          `📝 <b>မှတ်ချက်:</b> ${escapeHTML(reqBody.notes || "-")}\n\n` +
+          `<i>Approve နှိပ်လိုက်ပါက သက်ဆိုင်ရာ Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (${escapeHTML(formatBookingClientTypeShortBadge(reqBody.clientType))}) နှင့်တကွ အလိုအလျောက် အကြောင်းကြားစာ ပေးပို့ပေးပါမည်။</i>`;
+
+        const keyboard = reqBody.bookingId
+          ? {
+              inline_keyboard: [
+                [
+                  {
+                    text: "✅ Approve & Date Boy ထံ ပို့မည်",
+                    callback_data: `APP_HBK_${reqBody.bookingId}`,
+                  },
+                  {
+                    text: "❌ Reject",
+                    callback_data: `REJ_HBK_${reqBody.bookingId}`,
+                  },
+                ],
+              ],
+            }
+          : null;
+
+        await sendMessage(adminChatId, msg, keyboard);
       }
       return res.status(200).json({ status: "notified_admin" });
+    }
+
+    // Web Admin Panel Approve or Reject Dating Request (Booking) -> Notifies Date Boy (with Client Type), Client, and Admin Bot
+    if (
+      reqBody.internal_action === "web_admin_approve_booking" ||
+      reqBody.internal_action === "web_admin_reject_booking"
+    ) {
+      const isApprove = reqBody.internal_action === "web_admin_approve_booking";
+      const result = await approveOrRejectDatingBooking({
+        bookingId: reqBody.bookingId || "",
+        clientChatId: reqBody.clientChatId || "",
+        boyId: reqBody.dateBoyId || reqBody.boyId || "",
+        clientType: reqBody.clientType || "",
+        isApprove,
+        adminActor: reqBody.adminUsername || "Web Admin",
+      });
+      return res.status(200).json({
+        status: isApprove ? "booking_approved" : "booking_rejected",
+        ...result,
+      });
     }
 
     if (reqBody.internal_action === "request_media_reupload") {
@@ -2005,6 +2288,18 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: "ok" });
     }
 
+    if (text.startsWith("APP_HBK_") || text.startsWith("REJ_HBK_")) {
+      const isApprove = text.startsWith("APP_HBK_");
+      const bookingId = text.replace(/^APP_HBK_|^REJ_HBK_/, "");
+      await approveOrRejectDatingBooking({
+        bookingId,
+        isApprove,
+        adminActor: "Telegram Bot Admin",
+        notifyAdminChatId: chatId,
+      });
+      return res.status(200).json({ status: "ok" });
+    }
+
     if (text.startsWith("APP_") || text.startsWith("REJ_")) {
       const parts = text.split("_");
       const action = parts[0] + "_" + parts[1];
@@ -2092,22 +2387,16 @@ export default async function handler(req, res) {
           `❌ <b>${boyCode}</b> ၏ Private ပုံကြည့်ရှုရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`
         );
         await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
-      } else if (action === "APP_H") {
-        await sendMessage(
+      } else if (action === "APP_H" || action === "REJ_H") {
+        await approveOrRejectDatingBooking({
+          bookingId: parts[5] || "",
           clientChatId,
-          `✅ ငွေပေးချေမှု အောင်မြင်ပါသည်။ <b>${boyCode}</b> နှင့် Dating ပြုလုပ်ရန် အတည်ပြုပြီးပါပြီ! 🎉\n\nAdmin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`,
-          MAIN_MENU_KEYBOARD
-        );
-        await sendMessage(
-          chatId,
-          `✅ <b>${boyCode}</b> နှင့် Dating Request ကို အတည်ပြုပေးလိုက်ပါပြီ။ Client ထံ ဆက်သွယ်ပေးပါ။`
-        );
-      } else if (action === "REJ_H") {
-        await sendMessage(
-          clientChatId,
-          `❌ <b>${boyCode}</b> အား ခေါ်ယူရန် တောင်းဆိုချက်ကို ပယ်ချလိုက်ပါသည်။ ငွေလွှဲပြေစာ မမှန်ကန်ပါ။`
-        );
-        await sendMessage(chatId, `❌ Client ကို ပယ်ချကြောင်း အကြောင်းကြားလိုက်ပါပြီ။`);
+          boyId,
+          clientType: parts[4] || "",
+          isApprove: action === "APP_H",
+          adminActor: "Telegram Bot Admin",
+          notifyAdminChatId: chatId,
+        });
       } else if (action === "APP_D") {
         await updateDoc(doc(db, "dateboys", boyId), {
           status: "approved",
@@ -3432,31 +3721,222 @@ export default async function handler(req, res) {
 
     if (text.startsWith("REQ_H_")) {
       const boyId = text.replace("REQ_H_", "");
-      const config = await getAppConfig();
-      await setDoc(stateRef, { step: "WAIT_HIRE_SS", data: { boyId } }, { merge: true });
+      const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+      const boySnap = await getDoc(doc(db, "dateboys", boyId));
+      const boyData = boySnap.exists() ? boySnap.data() : {};
+      const boyPrefLabel = formatClientPreferenceLabel(boyData.clientPreference);
+
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_CLIENT_TYPE",
+          data: { ...(currentState.data || {}), boyId },
+        },
+        { merge: true }
+      );
       await sendMessage(
         chatId,
-        `❤️ Date Boy ခေါ်ယူခြင်းအတွက် ဈေးနှုန်းများမှာ အောက်ပါအတိုင်းဖြစ်ပါသည် -\n\n🕒 Section: ${config.feeSec} ကျပ်\n☀️ Day: ${config.feeDay} ကျပ်\n🌙 Night: ${config.feeNight} ကျပ်\n\n💳 Booking တင်ရန်အတွက် စရံငွေ (၅၀%) ကို အောက်ပါအကောင့်သို့ လွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
+        `❤️ <b>Date Boy (${boyCode}) အား ခေါ်ယူရန် (Dating Request)</b>\n` +
+          `🎯 <b>ဤ Date Boy လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyPrefLabel)}\n\n` +
+          `👤 <b>အဆင့် (၁) - သင်သည် မည်သည့် ဧည့်သည်အမျိုးအစား (Girl သို့မဟုတ် LGBT) ဖြစ်ပါသလဲ?</b>\n` +
+          `<i>(Request တင်ချိန်တွင် Admin ဖက်၌လည်းကောင်း၊ Admin မှ Approve ပေးလိုက်သည့်အခါ Date Boy ဆီသို့လည်းကောင်း သင်၏ ဧည့်သည်အမျိုးအစားကို တစ်ခါတည်း အသိပေးပြသသွားမည်ဖြစ်ပါသဖြင့် အရင်ဆုံး ရွေးချယ်ပေးပါ)</i>`,
+        {
+          inline_keyboard: [
+            [
+              {
+                text: "👩 Girl (အမျိုးသမီး ဧည့်သည် ဖြစ်ပါသည်)",
+                callback_data: `HIRTYPE_G_${boyId}`,
+              },
+            ],
+            [
+              {
+                text: "🏳️‍🌈 LGBT (LGBT ဧည့်သည် ဖြစ်ပါသည်)",
+                callback_data: `HIRTYPE_L_${boyId}`,
+              },
+            ],
+          ],
+        }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text.startsWith("HIRTYPE_") || text.startsWith("HIRFORCE_")) {
+      const isForce = text.startsWith("HIRFORCE_");
+      const rawPayload = text.replace(/^HIRTYPE_|^HIRFORCE_/, ""); // e.g. G_<boyId> or L_<boyId>
+      const typeCode = rawPayload.substring(0, 1); // 'G' or 'L'
+      const boyId = rawPayload.substring(2);
+      const chosenClientType = typeCode === "G" ? "girl" : "lgbt";
+      const clientTypeLabel = formatBookingClientTypeLabel(chosenClientType);
+      const clientTypeShort = formatBookingClientTypeShortBadge(chosenClientType);
+
+      const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+      const boySnap = await getDoc(doc(db, "dateboys", boyId));
+      const boyData = boySnap.exists() ? boySnap.data() : {};
+      const boyPrefLabel = formatClientPreferenceLabel(boyData.clientPreference);
+
+      if (!isForce && !isClientTypeCompatibleWithBoy(chosenClientType, boyData.clientPreference)) {
+        await sendMessage(
+          chatId,
+          `⚠️ <b>ဧည့်သည်အမျိုးအစား သတိပေးချက် (${boyCode})</b>\n\n` +
+            `ဤ Date Boy (<b>${boyCode}</b>) သည် <b>${escapeHTML(boyPrefLabel)}</b> သာ လက်ခံမည်ဟု သတ်မှတ်ထားသူ ဖြစ်ပါသည်။\n\n` +
+            `သင်ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစားမှာ <b>${escapeHTML(clientTypeLabel)}</b> ဖြစ်နေပါသဖြင့် အခြားကိုက်ညီသော Date Boy ကို ပြောင်းလဲရှာဖွေနိုင်ပါသည် (သို့မဟုတ် Admin မှတစ်ဆင့် ညှိနှိုင်းတောင်းဆိုလိုပါက အောက်ပါခလုတ်ကို နှိပ်ပါ) -`,
+          {
+            inline_keyboard: [
+              [{ text: "🔄 အခြား Date Boy ပြန်ရှာမည်", callback_data: "ROLE_CLIENT" }],
+              [
+                {
+                  text: `➡️ သိရှိပါသည် — ${clientTypeShort} အဖြစ် ဆက်လက်ခေါ်ယူမည်`,
+                  callback_data: `HIRFORCE_${typeCode}_${boyId}`,
+                },
+              ],
+            ],
+          }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+
+      const config = await getAppConfig();
+      await setDoc(
+        stateRef,
+        {
+          step: "WAIT_HIRE_SS",
+          data: { ...(currentState.data || {}), boyId, clientType: chosenClientType },
+        },
+        { merge: true }
+      );
+      await sendMessage(
+        chatId,
+        `✅ <b>သင်၏ ဧည့်သည်အမျိုးအစား အတည်ပြုပြီးပါပြီ:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n\n` +
+          `❤️ <b>${boyCode}</b> အား ခေါ်ယူခြင်းအတွက် ဈေးနှုန်းများမှာ အောက်ပါအတိုင်းဖြစ်ပါသည် -\n\n` +
+          `🕒 Section: ${config.feeSec} ကျပ်\n` +
+          `☀️ Day: ${config.feeDay} ကျပ်\n` +
+          `🌙 Night: ${config.feeNight} ကျပ်\n\n` +
+          `💳 Booking တင်ရန်အတွက် စရံငွေ (၅၀%) ကို အောက်ပါအကောင့်သို့ လွှဲပေးပါ -\n` +
+          `<code>${escapeHTML(config.paymentInfo)}</code>\n\n` +
+          `📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (currentState.step === "HIRE_SELECT_CLIENT_TYPE" && text && !text.startsWith("/")) {
+      const boyId = currentState.data?.boyId || "";
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ သင်သည် <b>Girl (အမျိုးသမီး ဧည့်သည်)</b> သို့မဟုတ် <b>LGBT ဧည့်သည်</b> ဖြစ်ကြောင်း အောက်ပါခလုတ် (၂) ခုထဲမှ တစ်ခုကို နှိပ်၍ အရင်ဆုံး ရွေးချယ်ပေးပါ -",
+        {
+          inline_keyboard: [
+            [
+              {
+                text: "👩 Girl (အမျိုးသမီး ဧည့်သည် ဖြစ်ပါသည်)",
+                callback_data: `HIRTYPE_G_${boyId}`,
+              },
+            ],
+            [
+              {
+                text: "🏳️‍🌈 LGBT (LGBT ဧည့်သည် ဖြစ်ပါသည်)",
+                callback_data: `HIRTYPE_L_${boyId}`,
+              },
+            ],
+          ],
+        }
       );
       return res.status(200).json({ status: "success" });
     }
 
     if (currentState.step === "WAIT_HIRE_SS" && photos.length > 0) {
-      const boyId = currentState.data.boyId;
+      const boyId = String(currentState.data.boyId || "");
+      const clientType = normalizeBookingClientType(currentState.data.clientType || "");
+      const clientTypeLabel = formatBookingClientTypeLabel(clientType);
+      const clientTypeShort = formatBookingClientTypeShortBadge(clientType);
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+
+      const boySnap = boyId ? await getDoc(doc(db, "dateboys", boyId)) : null;
+      const boyData = boySnap?.exists() ? boySnap.data() : {};
+      const boyName = boyData.name || boyCode;
+      const boyCity = boyData.city || "-";
+      const boyTownship = boyData.township || "-";
+      const boyPrefLabel = formatClientPreferenceLabel(boyData.clientPreference);
+      const boyChatId =
+        boyData.telegramChatId ||
+        (typeof boyData.telegramProfileLink === "string"
+          ? boyData.telegramProfileLink.match(/id=(\d+)/)?.[1]
+          : null);
+      const boyTgLink =
+        boyData.telegramProfileLink || (boyChatId ? `tg://user?id=${boyChatId}` : "");
+
+      const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
+      const clientDisplayName = message?.from?.first_name
+        ? `${message.from.first_name}${message.from.last_name ? " " + message.from.last_name : ""}`
+        : username
+          ? `@${username}`
+          : `Telegram Client (${chatId})`;
+      const bookingRef = `WL-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+
+      let bookingDocId = "";
+      try {
+        const bkDocRef = await addDoc(collection(db, "bookings"), {
+          bookingRef,
+          source: "telegram_bot",
+          dateBoyId: boyId,
+          dateBoyCode: boyCode,
+          dateBoyName: boyName,
+          dateBoyCity: boyCity,
+          dateBoyTownship: boyTownship,
+          dateBoyPreference: normalizeClientPreference(boyData.clientPreference),
+          dateBoyChatId: boyChatId || null,
+          clientType: clientType || "lgbt",
+          clientName: clientDisplayName,
+          clientContact: username ? `@${username}` : `tg://user?id=${chatId}`,
+          clientChatId: chatId,
+          clientProfileLink,
+          depositPhotoUrl: photos[0] || "",
+          depositFileId: fileIdToForward || "",
+          preferredDate: "Telegram Bot မှ ညှိနှိုင်းမည်",
+          preferredTime: "Telegram Bot",
+          duration: "50% Deposit Paid (Telegram Bot)",
+          notes: `Telegram Bot မှ စရံပြေစာ ပေးပို့ထားသော Dating Request (${clientTypeLabel})`,
+          status: "pending",
+          createdAt: serverTimestamp(),
+        });
+        bookingDocId = bkDocRef.id;
+      } catch (e) {
+        console.error("Failed to save Telegram booking doc:", e);
+      }
+
       await setDoc(stateRef, { step: "IDLE", data: {} }, { merge: true });
       await sendMessage(
         chatId,
-        "⏳ Booking စရံ ငွေလွှဲပြေစာ ရရှိပါပြီ။ Admin မှ အတည်ပြုပြီးပါက အကြောင်းပြန်ပေးပါမည်။"
+        `⏳ <b>Booking စရံ ငွေလွှဲပြေစာ ရရှိပါပြီ (${bookingRef})။</b>\n\n` +
+          `👤 <b>Date Boy:</b> <b>${boyCode}</b>\n` +
+          `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n\n` +
+          `Admin မှ စစ်ဆေးအတည်ပြုပြီးသည်နှင့် သက်ဆိုင်ရာ Date Boy ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစားနှင့်တကွ ချက်ချင်း အကြောင်းကြားပေးပါမည်။`
       );
       if (adminChatId) {
-        const clientProfileLink = username ? `https://t.me/${username}` : `tg://user?id=${chatId}`;
-        const adminMsg = `🚨 <b>Dating Request (Booking)</b> 🚨\n\nDate Boy: <b>${boyCode}</b>\nClient: <a href="${clientProfileLink}">Profile</a>\n\nClient မှ Booking စရံပြေစာ ပို့ထားပါသည်။`;
+        const boyLinkLine = boyTgLink
+          ? `\n🔗 <b>Date Boy Telegram:</b> <a href="${boyTgLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန်</a>`
+          : "";
+        const adminMsg =
+          `🚨 <b>Dating Request (Booking) — ${bookingRef}</b> 🚨\n\n` +
+          `🆔 <b>Date Boy:</b> ${escapeHTML(boyName)} (<b>${boyCode}</b>)\n` +
+          `🎯 <b>Date Boy လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyPrefLabel)}\n` +
+          `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+          `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+          `🧑‍💼 <b>Client:</b> <a href="${clientProfileLink}">💬 ${escapeHTML(clientDisplayName)} (Profile နှိပ်ရန်)</a>` +
+          boyLinkLine +
+          `\n\n💳 Client မှ Booking စရံပြေစာ ပို့ထားပါသည်။ Approve နှိပ်လိုက်ပါက Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့်တကွ အလိုအလျောက် အကြောင်းကြားစာ ပို့ပေးပါမည်။`;
+
+        const approveCallback = bookingDocId
+          ? `APP_HBK_${bookingDocId}`
+          : `APP_H_${chatId}_${boyId}_${clientType === "girl" ? "girl" : "lgbt"}`;
+        const rejectCallback = bookingDocId
+          ? `REJ_HBK_${bookingDocId}`
+          : `REJ_H_${chatId}_${boyId}_${clientType === "girl" ? "girl" : "lgbt"}`;
+
         const keyboard = {
           inline_keyboard: [
             [
-              { text: "✅ Approve Hire", callback_data: `APP_H_${chatId}_${boyId}` },
-              { text: "❌ Reject", callback_data: `REJ_H_${chatId}_${boyId}` },
+              { text: "✅ Approve & Date Boy ထံ ပို့မည်", callback_data: approveCallback },
+              { text: "❌ Reject", callback_data: rejectCallback },
             ],
           ],
         };

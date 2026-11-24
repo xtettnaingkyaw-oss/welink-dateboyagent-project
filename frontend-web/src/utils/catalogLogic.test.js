@@ -21,6 +21,10 @@ import {
   formatClientPreferenceShortBadge,
   matchesClientPreferenceFilter,
   GIRL_ONLY_REMINDER_MESSAGE,
+  normalizeBookingClientType,
+  formatBookingClientTypeLabel,
+  formatBookingClientTypeShortBadge,
+  checkClientTypeCompatibility,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -465,6 +469,56 @@ test('Client Preference (Girl Only / LGBT Only / Both) normalization, Girl Only 
   );
   assert.match(formattedPrefMsg, /Girl Only/);
 });
+
+test('Dating Request Client Type (Girl / LGBT) normalization, Date Boy compatibility verification, and booking summary formatting', () => {
+  // 1. Normalization of Client Type
+  assert.equal(normalizeBookingClientType('girl'), 'girl');
+  assert.equal(normalizeBookingClientType('👩 Girl (အမျိုးသမီး ဧည့်သည်)'), 'girl');
+  assert.equal(normalizeBookingClientType('lgbt'), 'lgbt');
+  assert.equal(normalizeBookingClientType('🏳️‍🌈 LGBT ဧည့်သည်'), 'lgbt');
+  assert.equal(normalizeBookingClientType(''), '');
+
+  assert.match(formatBookingClientTypeLabel('girl'), /Girl/);
+  assert.match(formatBookingClientTypeLabel('lgbt'), /LGBT/);
+  assert.equal(formatBookingClientTypeShortBadge('girl'), '👩 Girl ဧည့်သည်');
+  assert.equal(formatBookingClientTypeShortBadge('lgbt'), '🏳️‍🌈 LGBT ဧည့်သည်');
+
+  // 2. Compatibility check between Client Type ('girl' | 'lgbt') and Date Boy preference ('girl_only' | 'lgbt_only' | 'both')
+  const missingTypeCheck = checkClientTypeCompatibility('', 'both');
+  assert.equal(missingTypeCheck.compatible, false);
+  assert.match(missingTypeCheck.warning, /Girl.*LGBT/);
+
+  assert.equal(checkClientTypeCompatibility('girl', 'girl_only').compatible, true);
+  assert.equal(checkClientTypeCompatibility('girl', 'both').compatible, true);
+
+  const girlWithLgbtOnlyBoy = checkClientTypeCompatibility('girl', 'lgbt_only');
+  assert.equal(girlWithLgbtOnlyBoy.compatible, false);
+  assert.match(girlWithLgbtOnlyBoy.warning, /LGBT Only/);
+
+  assert.equal(checkClientTypeCompatibility('lgbt', 'lgbt_only').compatible, true);
+  assert.equal(checkClientTypeCompatibility('lgbt', 'both').compatible, true);
+
+  const lgbtWithGirlOnlyBoy = checkClientTypeCompatibility('lgbt', 'girl_only');
+  assert.equal(lgbtWithGirlOnlyBoy.compatible, false);
+  assert.match(lgbtWithGirlOnlyBoy.warning, /Girl Only/);
+
+  // 3. Booking summary includes Client Type
+  const summaryWithClientType = formatBookingSummary({
+    bookingRef: 'WL-88G11',
+    boy: { id: 'abcde12', boyCode: 'WLDB-ABCDE', name: 'Julian', township: 'Bahan', city: 'Yangon' },
+    bookingForm: {
+      clientName: 'May',
+      clientContact: '@may_vip',
+      clientType: 'girl',
+      preferredDate: '2026-12-05',
+      preferredTime: '20:00',
+      duration: '3 Hours (Dinner / Evening Social)',
+      notes: 'Fine dining reservation',
+    },
+  });
+  assert.match(summaryWithClientType, /Client Type: 👩 Girl \(အမျိုးသမီး ဧည့်သည်\)/);
+});
+
 
 
 

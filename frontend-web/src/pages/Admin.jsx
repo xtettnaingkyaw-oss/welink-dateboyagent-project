@@ -66,6 +66,10 @@ import {
   normalizeClientPreference,
   formatClientPreferenceLabel,
   formatClientPreferenceShortBadge,
+  normalizeBookingClientType,
+  formatBookingClientTypeLabel,
+  formatBookingClientTypeShortBadge,
+  extractTimestampMs,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -1135,9 +1139,55 @@ export default function Admin() {
     showToast('Client ID ကို ပယ်ဖျက်ပြီးပါပြီ။', 'info');
   };
 
-  const handleUpdateBookingStatus = async (id, status) => {
-    await updateDoc(doc(db, 'bookings', id), { status });
-    showToast(`Reservation status updated to ${status.toUpperCase()}.`, 'success');
+  const [processingBookingId, setProcessingBookingId] = useState(null);
+  const [bookingClientTypeFilter, setBookingClientTypeFilter] = useState('all');
+
+  const handleUpdateBookingStatus = async (bk, status) => {
+    if (!bk || !bk.id || processingBookingId) return;
+    setProcessingBookingId(bk.id);
+    const isApprove = status === 'confirmed';
+    const clientTypeShort = formatBookingClientTypeShortBadge(bk.clientType);
+    try {
+      await updateDoc(doc(db, 'bookings', bk.id), {
+        status,
+        updatedAt: serverTimestamp(),
+      });
+
+      const res = await fetch('/api/webhook', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          internal_action: isApprove
+            ? 'web_admin_approve_booking'
+            : 'web_admin_reject_booking',
+          bookingId: bk.id,
+          dateBoyId: bk.dateBoyId || '',
+          clientChatId: bk.clientChatId || '',
+          clientType: bk.clientType || '',
+          adminUsername: loggedInAdmin?.username || 'Web Admin',
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+
+      if (isApprove) {
+        showToast(
+          data.dateBoyNotified
+            ? `✅ ${bk.bookingRef || 'Booking'} အား အတည်ပြုပြီး Date Boy (${bk.dateBoyName || bk.dateBoyCode}) ထံသို့ ဧည့်သည်အမျိုးအစား (${clientTypeShort}) နှင့်တကွ အကြောင်းကြားစာ ပေးပို့ပြီးပါပြီ!`
+            : `✅ ${bk.bookingRef || 'Booking'} အား အတည်ပြုပြီး Admin Telegram Bot သို့ အသိပေးချက် ပေးပို့ပြီးပါပြီ။`,
+          'success'
+        );
+      } else {
+        showToast(
+          `❌ ${bk.bookingRef || 'Booking'} (${clientTypeShort}) အား ပယ်ချပြီးပါပြီ။`,
+          'info'
+        );
+      }
+    } catch (err) {
+      console.error('Booking approval error:', err);
+      showToast(`Reservation status updated to ${status.toUpperCase()}.`, 'success');
+    } finally {
+      setProcessingBookingId(null);
+    }
   };
 
   const handleDeleteBooking = async (id) => {
@@ -1710,7 +1760,7 @@ export default function Admin() {
           <TabButton
             tab="bookings"
             icon={Calendar}
-            label="Web Reservations"
+            label="Dating Requests (Bookings)"
             count={bookings.length}
           />
           <TabButton
@@ -2650,97 +2700,266 @@ export default function Admin() {
             </div>
           )}
 
-          {activeTab === 'bookings' && (
-            <div className="space-y-6">
-              <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
-                Web Concierge Reservations ({bookings.length})
-              </h2>
-              {bookings.length === 0 ? (
-                <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3]">
-                  <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto mb-3 text-[#9E7B36] border border-[#E6DFD3]">
-                    <Calendar size={22} />
-                  </div>
-                  <p className="text-sm font-semibold text-[#0C0D0E]">
-                    Website မှတစ်ဆင့် တောင်းဆိုထားသော Reservation မရှိသေးပါ။
-                  </p>
-                </div>
-              ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                  {bookings.map((bk) => (
-                    <div
-                      key={bk.id}
-                      className="bg-white border border-[#E6DFD3] p-6 rounded-xl flex flex-col justify-between space-y-4"
-                    >
-                      <div className="space-y-3">
-                        <div className="flex items-center justify-between border-b border-[#EFECE6] pb-2.5">
-                          <span className="font-mono text-xs font-semibold text-[#9E7B36] tabular-nums">
-                            {bk.bookingRef || 'WL-BOOKING'}
-                          </span>
-                          <span className="font-mono text-[11px] font-semibold uppercase text-[#0C0D0E]">
-                            {bk.status || 'pending'}
-                          </span>
-                        </div>
-                        <div>
-                          <span className="text-[11px] text-[#787167] block">Companion</span>
-                          <h4 className="font-serif text-xl font-semibold text-[#0C0D0E]">
-                            {bk.dateBoyName || 'Companion'}
-                          </h4>
-                          <p className="text-xs text-[#5C564E]">
-                            {bk.dateBoyTownship}, {bk.dateBoyCity}
-                          </p>
-                        </div>
-                        <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3] text-xs space-y-1.5 tabular-nums">
-                          <p>
-                            <span className="text-[#787167]">Client:</span>{' '}
-                            <strong className="text-[#0C0D0E]">{bk.clientName}</strong>
-                          </p>
-                          <p>
-                            <span className="text-[#787167]">Contact:</span>{' '}
-                            <strong className="font-mono text-[#0C0D0E]">{bk.clientContact}</strong>
-                          </p>
-                          <p>
-                            <span className="text-[#787167]">Schedule:</span>{' '}
-                            <strong className="font-mono text-[#0C0D0E]">
-                              {bk.preferredDate} · {bk.preferredTime}
-                            </strong>
-                          </p>
-                          <p>
-                            <span className="text-[#787167]">Package:</span>{' '}
-                            <span className="text-[#0C0D0E]">{bk.duration}</span>
-                          </p>
-                          {bk.notes && (
-                            <p className="text-[#5C564E] pt-1 border-t border-[#E6DFD3]">
-                              {bk.notes}
-                            </p>
-                          )}
-                        </div>
-                      </div>
+          {activeTab === 'bookings' && (() => {
+            const sortedBookings = [...bookings]
+              .filter((bk) => {
+                if (bookingClientTypeFilter === 'all') return true;
+                return normalizeBookingClientType(bk.clientType) === bookingClientTypeFilter;
+              })
+              .sort((a, b) => {
+                const tA = extractTimestampMs(a.createdAt);
+                const tB = extractTimestampMs(b.createdAt);
+                return tB - tA;
+              });
 
-                      <div className="flex items-center gap-2 pt-2">
-                        {bk.status !== 'confirmed' && (
-                          <button
-                            type="button"
-                            onClick={() => handleUpdateBookingStatus(bk.id, 'confirmed')}
-                            className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-2.5 rounded-lg text-xs font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors"
-                          >
-                            Mark Confirmed
-                          </button>
-                        )}
+            return (
+              <div className="space-y-6">
+                <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-4 sm:p-5 rounded-2xl border border-[#E6DFD3] shadow-sm">
+                  <div>
+                    <h2 className="font-serif text-2xl sm:text-3xl font-semibold text-[#0C0D0E] tabular-nums">
+                      Dating Requests & Reservations ({sortedBookings.length}
+                      {bookingClientTypeFilter !== 'all' ? ` / ${bookings.length}` : ''})
+                    </h2>
+                    <p className="text-xs text-[#6E675F] mt-0.5">
+                      Website နှင့် Telegram Bot မှ တက်လာသော Dating Request များ — Approve နှိပ်လိုက်ပါက သက်ဆိုင်ရာ Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (Girl သို့မဟုတ် LGBT) နှင့်တကွ အလိုအလျောက် အကြောင်းကြားပေးပါမည်။
+                    </p>
+                  </div>
+
+                  {/* Client Type Filter (All / Girl / LGBT) */}
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-xs font-semibold text-[#5C564E] mr-1">
+                      ဧည့်သည်အမျိုးအစား:
+                    </span>
+                    {[
+                      { id: 'all', label: 'အားလုံး (All)' },
+                      { id: 'girl', label: '👩 Girl ဧည့်သည်' },
+                      { id: 'lgbt', label: '🏳️‍🌈 LGBT ဧည့်သည်' },
+                    ].map((opt) => {
+                      const active = bookingClientTypeFilter === opt.id;
+                      return (
                         <button
+                          key={opt.id}
                           type="button"
-                          onClick={() => handleDeleteBooking(bk.id)}
-                          aria-label={`Delete reservation ${bk.bookingRef}`}
-                          className="p-2.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 hover:bg-rose-100 transition-colors"
+                          onClick={() => setBookingClientTypeFilter(opt.id)}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer border ${
+                            active
+                              ? 'bg-[#0C0D0E] text-[#FAF8F5] border-[#0C0D0E]'
+                              : 'bg-[#FAF8F5] text-[#5C564E] border-[#E6DFD3] hover:text-[#0C0D0E]'
+                          }`}
                         >
-                          <Trash2 size={15} />
+                          {opt.label}
                         </button>
-                      </div>
-                    </div>
-                  ))}
+                      );
+                    })}
+                  </div>
                 </div>
-              )}
-            </div>
-          )}
+
+                {sortedBookings.length === 0 ? (
+                  <div className="bg-white p-12 sm:p-16 text-center rounded-xl border border-[#E6DFD3]">
+                    <div className="w-12 h-12 bg-[#FAF8F5] rounded-lg flex items-center justify-center mx-auto mb-3 text-[#9E7B36] border border-[#E6DFD3]">
+                      <Calendar size={22} />
+                    </div>
+                    <p className="text-sm font-semibold text-[#0C0D0E]">
+                      {bookingClientTypeFilter !== 'all'
+                        ? 'ရွေးချယ်ထားသော ဧည့်သည်အမျိုးအစားဖြင့် Dating Request မရှိသေးပါ။'
+                        : 'လောလောဆယ် Dating Request / Reservation မရှိသေးပါ။'}
+                    </p>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+                    {sortedBookings.map((bk) => {
+                      const normClientType = normalizeBookingClientType(bk.clientType);
+                      const clientTypeLabel = formatBookingClientTypeLabel(bk.clientType);
+                      const depositImgUrl = resolveMediaUrl(
+                        bk.depositPhotoUrl,
+                        bk.depositFileId,
+                        'photo'
+                      );
+                      const isProcessing = processingBookingId === bk.id;
+                      const isFromBot = bk.source === 'telegram_bot' || Boolean(bk.clientChatId);
+
+                      return (
+                        <div
+                          key={bk.id}
+                          className="bg-white border border-[#E6DFD3] p-6 rounded-xl flex flex-col justify-between space-y-4 shadow-sm"
+                        >
+                          <div className="space-y-3.5">
+                            <div className="flex items-center justify-between border-b border-[#EFECE6] pb-2.5 gap-2">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-xs font-bold text-[#9E7B36] tabular-nums">
+                                  {bk.bookingRef || 'WL-BOOKING'}
+                                </span>
+                                <span className="text-[10px] font-semibold px-2 py-0.5 rounded bg-[#FAF8F5] border border-[#E6DFD3] text-[#5C564E]">
+                                  {isFromBot ? '🤖 Telegram Bot' : '🌐 Website'}
+                                </span>
+                              </div>
+                              <span
+                                className={`font-mono text-[11px] font-bold uppercase px-2.5 py-0.5 rounded ${
+                                  bk.status === 'confirmed'
+                                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+                                    : bk.status === 'rejected'
+                                      ? 'bg-rose-50 text-rose-700 border border-rose-200'
+                                      : 'bg-amber-50 text-amber-800 border border-amber-200'
+                                }`}
+                              >
+                                {bk.status === 'confirmed'
+                                  ? '✅ Approved'
+                                  : bk.status === 'rejected'
+                                    ? '❌ Rejected'
+                                    : '⏳ Pending'}
+                              </span>
+                            </div>
+
+                            {/* Highlighted Client Type Badge (Girl or LGBT) */}
+                            <div
+                              className={`p-3 rounded-xl border flex items-center justify-between ${
+                                normClientType === 'girl'
+                                  ? 'bg-amber-50/90 border-amber-300 text-amber-950'
+                                  : normClientType === 'lgbt'
+                                    ? 'bg-purple-50/90 border-purple-200 text-purple-950'
+                                    : 'bg-slate-50 border-slate-200 text-slate-800'
+                              }`}
+                            >
+                              <div>
+                                <span className="text-[10px] font-mono uppercase tracking-wider opacity-75 block">
+                                  ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (CLIENT TYPE)
+                                </span>
+                                <span className="text-xs sm:text-sm font-bold">
+                                  {clientTypeLabel}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div>
+                              <span className="text-[11px] text-[#787167] block">
+                                ရွေးချယ်ထားသော Date Boy (Companion)
+                              </span>
+                              <div className="flex items-center justify-between gap-2 mt-0.5">
+                                <h4 className="font-serif text-xl font-semibold text-[#0C0D0E]">
+                                  {bk.dateBoyName || 'Companion'}{' '}
+                                  {bk.dateBoyCode && (
+                                    <span className="font-mono text-xs text-[#9E7B36]">
+                                      ({bk.dateBoyCode})
+                                    </span>
+                                  )}
+                                </h4>
+                              </div>
+                              <p className="text-xs text-[#5C564E]">
+                                {bk.dateBoyTownship}, {bk.dateBoyCity}
+                              </p>
+                              {bk.dateBoyPreference && (
+                                <p className="text-[11px] font-semibold text-emerald-800 mt-1">
+                                  🎯 Date Boy လက်ခံသော ဧည့်သည်:{' '}
+                                  {formatClientPreferenceShortBadge(bk.dateBoyPreference)}
+                                </p>
+                              )}
+                            </div>
+
+                            <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3] text-xs space-y-1.5 tabular-nums">
+                              <p>
+                                <span className="text-[#787167]">Client:</span>{' '}
+                                <strong className="text-[#0C0D0E]">{bk.clientName || '-'}</strong>
+                              </p>
+                              <p>
+                                <span className="text-[#787167]">Contact:</span>{' '}
+                                <strong className="font-mono text-[#0C0D0E]">
+                                  {bk.clientContact || '-'}
+                                </strong>
+                              </p>
+                              {bk.clientProfileLink && (
+                                <p>
+                                  <a
+                                    href={bk.clientProfileLink}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-[#9E7B36] font-semibold hover:underline"
+                                  >
+                                    <MessageCircle size={12} />
+                                    <span>Client Telegram သို့ တိုက်ရိုက်စကားပြောရန်</span>
+                                    <ExternalLink size={11} />
+                                  </a>
+                                </p>
+                              )}
+                              <p>
+                                <span className="text-[#787167]">Schedule:</span>{' '}
+                                <strong className="font-mono text-[#0C0D0E]">
+                                  {bk.preferredDate || '-'} · {bk.preferredTime || '-'}
+                                </strong>
+                              </p>
+                              <p>
+                                <span className="text-[#787167]">Package:</span>{' '}
+                                <span className="text-[#0C0D0E]">{bk.duration || '-'}</span>
+                              </p>
+                              {bk.notes && (
+                                <p className="text-[#5C564E] pt-1 border-t border-[#E6DFD3]">
+                                  {bk.notes}
+                                </p>
+                              )}
+                            </div>
+
+                            {depositImgUrl && (
+                              <div className="space-y-1">
+                                <span className="text-[11px] font-semibold text-[#5C564E] block">
+                                  💳 စရံငွေလွှဲပြေစာ (Deposit Screenshot):
+                                </span>
+                                <img
+                                  src={depositImgUrl}
+                                  alt="Deposit Receipt"
+                                  onClick={() => setModalImage(depositImgUrl)}
+                                  className="w-full h-36 object-cover rounded-lg border border-[#E6DFD3] cursor-pointer hover:opacity-90 transition-opacity"
+                                />
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 pt-2">
+                            {bk.status !== 'confirmed' && (
+                              <button
+                                type="button"
+                                disabled={isProcessing}
+                                onClick={() => handleUpdateBookingStatus(bk, 'confirmed')}
+                                className="flex-1 bg-emerald-600 text-white py-2.5 px-3 rounded-lg text-xs font-semibold hover:bg-emerald-700 transition-colors cursor-pointer disabled:opacity-50 flex items-center justify-center gap-1.5"
+                              >
+                                {isProcessing ? (
+                                  <>
+                                    <Loader2 size={14} className="animate-spin" />
+                                    <span>ပို့နေပါသည်...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <CheckCircle2 size={14} />
+                                    <span>Approve & Date Boy ထံ ပို့မည်</span>
+                                  </>
+                                )}
+                              </button>
+                            )}
+                            {bk.status === 'pending' && (
+                              <button
+                                type="button"
+                                disabled={isProcessing}
+                                onClick={() => handleUpdateBookingStatus(bk, 'rejected')}
+                                className="px-3 py-2.5 bg-amber-50 text-amber-900 rounded-lg border border-amber-200 hover:bg-amber-100 text-xs font-semibold transition-colors cursor-pointer"
+                              >
+                                Reject
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteBooking(bk.id)}
+                              aria-label={`Delete reservation ${bk.bookingRef}`}
+                              className="p-2.5 bg-rose-50 text-rose-700 rounded-lg border border-rose-200 hover:bg-rose-100 transition-colors cursor-pointer"
+                            >
+                              <Trash2 size={15} />
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
 
           {activeTab === 'clients' && (
             <div className="space-y-6">
