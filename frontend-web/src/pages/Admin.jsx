@@ -70,6 +70,7 @@ import {
   formatBookingClientTypeLabel,
   formatBookingClientTypeShortBadge,
   extractTimestampMs,
+  formatKyats,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -84,6 +85,7 @@ import {
   countCatalogStats,
 } from '../utils/myanmarLocations';
 import AdminLocationsManager from '../components/AdminLocationsManager';
+import AdminPricingManager from '../components/AdminPricingManager';
 
 const DateBoyCard = ({
   boy,
@@ -1552,6 +1554,23 @@ export default function Admin() {
     showToast('Pricing & Fees updated.', 'success');
   };
 
+  const handleSavePricingConfig = async (pricingPayload) => {
+    setIsConfigSaving(true);
+    try {
+      await setDoc(doc(db, 'settings', 'app_config'), pricingPayload, { merge: true });
+      setIsEditingPricing(false);
+      showToast(
+        'ငွေပေးချေမှုနှင့် Package Menu Card ဈေးနှုန်းများ သိမ်းဆည်းပြီးပါပြီ (Bot & Web Synced)။',
+        'success'
+      );
+    } catch (err) {
+      console.error('Save pricing config error:', err);
+      showToast('ဈေးနှုန်းများ သိမ်းဆည်းရာတွင် အမှားဖြစ်ပွားပါသည်။', 'error');
+    } finally {
+      setIsConfigSaving(false);
+    }
+  };
+
   if (!loggedInAdmin) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-[#0B1120] via-[#0F172A] to-[#062E22] flex items-center justify-center p-4">
@@ -1780,6 +1799,12 @@ export default function Admin() {
             icon={MapPin}
             label="မြို့ / မြို့နယ်များ"
             count={pendingLocations.length}
+          />
+          <TabButton
+            tab="pricing"
+            icon={CreditCard}
+            label="ဈေးနှုန်းနှင့် ငွေပေးချေမှု"
+            count={0}
           />
           <TabButton tab="settings" icon={Settings} label="Agency Settings" count={0} />
           {loggedInAdmin.role === 'super_admin' && (
@@ -2888,8 +2913,32 @@ export default function Admin() {
                               </p>
                               <p>
                                 <span className="text-[#787167]">Package:</span>{' '}
-                                <span className="text-[#0C0D0E]">{bk.duration || '-'}</span>
+                                <strong className="text-[#0C0D0E]">
+                                  {bk.packageName || bk.duration || '-'}
+                                </strong>
                               </p>
+                              {bk.packageDuration && (
+                                <p>
+                                  <span className="text-[#787167]">သတ်မှတ်ကြာချိန်:</span>{' '}
+                                  <span className="text-[#0C0D0E] font-medium">
+                                    {bk.packageDuration}
+                                  </span>
+                                </p>
+                              )}
+                              {Number(bk.packagePrice) > 0 && (
+                                <p className="font-mono tabular-nums">
+                                  <span className="text-[#787167] font-sans">ဈေးနှုန်း / စရံ:</span>{' '}
+                                  <strong className="text-[#0C0D0E]">
+                                    {formatKyats(bk.packagePrice)} Ks
+                                  </strong>
+                                  {Number(bk.depositAmount) > 0 && (
+                                    <span className="text-emerald-700 font-semibold">
+                                      {' '}
+                                      (စရံ {formatKyats(bk.depositAmount)} Ks)
+                                    </span>
+                                  )}
+                                </p>
+                              )}
                               {bk.notes && (
                                 <p className="text-[#5C564E] pt-1 border-t border-[#E6DFD3]">
                                   {bk.notes}
@@ -3215,355 +3264,177 @@ export default function Admin() {
             </div>
           )}
 
+          {activeTab === 'pricing' && (
+            <AdminPricingManager
+              appConfig={appConfig}
+              onSavePricingConfig={handleSavePricingConfig}
+              isSaving={isConfigSaving}
+            />
+          )}
+
           {activeTab === 'settings' && (
-            <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
-              <div className="xl:col-span-2 space-y-8">
-                {/* Requirements & Rules */}
-                <div className="bg-white p-6 sm:p-8 rounded-xl border border-[#E6DFD3]">
-                  <div className="flex justify-between items-center mb-6 border-b border-[#EFECE6] pb-4">
-                    <h3 className="font-serif text-2xl font-semibold text-[#0C0D0E] flex items-center gap-2.5">
-                      <FileText size={18} className="text-[#9E7B36]" />
-                      <span>လျှောက်ထားသူများအတွက် စည်းကမ်းချက်များ</span>
-                    </h3>
-                    {!isEditingRules && (
-                      <button
-                        type="button"
-                        onClick={startEditRules}
-                        className="flex items-center gap-1.5 bg-[#FAF8F5] hover:bg-[#F5EFE6] text-[#0C0D0E] px-4 py-2 rounded-lg text-xs font-semibold border border-[#E6DFD3] transition-colors"
-                      >
-                        <Pencil size={13} />
-                        <span>Edit</span>
-                      </button>
-                    )}
-                  </div>
+            <div className="space-y-8">
+              {/* Full Professional Pricing, Payment Accounts & Bot Menu Cards Manager */}
+              <AdminPricingManager
+                appConfig={appConfig}
+                onSavePricingConfig={handleSavePricingConfig}
+                isSaving={isConfigSaving}
+              />
 
-                  {isEditingRules ? (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-[#0C0D0E] mb-2">
-                          လိုအပ်သည့်အချက်များ (Requirements)
-                        </label>
-                        <textarea
-                          rows={4}
-                          value={draftRules.reqText}
-                          onChange={(e) =>
-                            setDraftRules({ ...draftRules, reqText: e.target.value })
-                          }
-                          className="w-full p-4 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E] leading-relaxed"
-                          required
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs font-semibold text-[#0C0D0E] mb-2">
-                          စည်းမျဉ်းစည်းကမ်းများ (Rules)
-                        </label>
-                        <textarea
-                          rows={4}
-                          value={draftRules.ruleText}
-                          onChange={(e) =>
-                            setDraftRules({ ...draftRules, ruleText: e.target.value })
-                          }
-                          className="w-full p-4 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E] leading-relaxed"
-                          required
-                        />
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={handleSaveRules}
-                          disabled={isConfigSaving}
-                          className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#1E2126] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                        >
-                          {isConfigSaving ? (
-                            'Saving...'
-                          ) : (
-                            <>
-                              <Save size={14} />
-                              <span>Save Changes</span>
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingRules(false)}
-                          className="px-6 bg-[#FAF8F5] text-[#5C564E] rounded-lg text-xs font-semibold border border-[#E6DFD3]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-5">
-                      <div>
-                        <span className="text-xs font-semibold text-[#6E675F] block mb-2">
-                          လိုအပ်သည့်အချက်များ
-                        </span>
-                        <div className="text-xs sm:text-sm bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3] whitespace-pre-wrap text-[#0C0D0E] leading-relaxed">
-                          {appConfig.reqText || '-'}
-                        </div>
-                      </div>
-                      <div>
-                        <span className="text-xs font-semibold text-[#6E675F] block mb-2">
-                          စည်းမျဉ်းစည်းကမ်းများ
-                        </span>
-                        <div className="text-xs sm:text-sm bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3] whitespace-pre-wrap text-[#0C0D0E] leading-relaxed">
-                          {appConfig.ruleText || '-'}
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                {/* Pricing & Fees */}
-                <div className="bg-white p-6 sm:p-8 rounded-xl border border-[#E6DFD3]">
-                  <div className="flex justify-between items-center mb-6 border-b border-[#EFECE6] pb-4">
-                    <h3 className="font-serif text-2xl font-semibold text-[#0C0D0E] flex items-center gap-2.5">
-                      <CreditCard size={18} className="text-[#9E7B36]" />
-                      <span>ငွေပေးချေမှုနှင့် ဈေးနှုန်းများ (Pricing & Fees)</span>
-                    </h3>
-                    {!isEditingPricing && (
-                      <button
-                        type="button"
-                        onClick={startEditPricing}
-                        className="flex items-center gap-1.5 bg-[#FAF8F5] hover:bg-[#F5EFE6] text-[#0C0D0E] px-4 py-2 rounded-lg text-xs font-semibold border border-[#E6DFD3] transition-colors"
-                      >
-                        <Pencil size={13} />
-                        <span>Edit</span>
-                      </button>
-                    )}
-                  </div>
-
-                  {isEditingPricing ? (
-                    <div className="space-y-4">
-                      <div>
-                        <label className="block text-xs font-semibold text-[#0C0D0E] mb-2">
-                          Payment Account Info (ငွေလွှဲရန် အချက်အလက်)
-                        </label>
-                        <input
-                          type="text"
-                          value={draftPricing.paymentInfo}
-                          onChange={(e) =>
-                            setDraftPricing({ ...draftPricing, paymentInfo: e.target.value })
-                          }
-                          className="w-full p-3.5 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E]"
-                          required
-                        />
-                      </div>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <label className="block text-xs font-semibold text-[#6E675F] mb-1.5">
-                            Client ID ဝယ်ယူခ (Ks)
-                          </label>
-                          <input
-                            type="number"
-                            value={draftPricing.clientIdFee}
-                            onChange={(e) =>
-                              setDraftPricing({
-                                ...draftPricing,
-                                clientIdFee: Number(e.target.value),
-                              })
-                            }
-                            className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm font-mono tabular-nums outline-none"
-                            required
-                          />
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <label className="block text-xs font-semibold text-[#6E675F] mb-1.5">
-                            Private Photo Fee (Ks)
-                          </label>
-                          <input
-                            type="number"
-                            value={draftPricing.privFee}
-                            onChange={(e) =>
-                              setDraftPricing({
-                                ...draftPricing,
-                                privFee: Number(e.target.value),
-                              })
-                            }
-                            className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm font-mono tabular-nums outline-none"
-                            required
-                          />
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <label className="block text-xs font-semibold text-[#6E675F] mb-1.5">
-                            Dating Fee — Section (Ks)
-                          </label>
-                          <input
-                            type="number"
-                            value={draftPricing.feeSec}
-                            onChange={(e) =>
-                              setDraftPricing({
-                                ...draftPricing,
-                                feeSec: Number(e.target.value),
-                              })
-                            }
-                            className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm font-mono tabular-nums outline-none"
-                            required
-                          />
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <label className="block text-xs font-semibold text-[#6E675F] mb-1.5">
-                            Dating Fee — Day (Ks)
-                          </label>
-                          <input
-                            type="number"
-                            value={draftPricing.feeDay}
-                            onChange={(e) =>
-                              setDraftPricing({
-                                ...draftPricing,
-                                feeDay: Number(e.target.value),
-                              })
-                            }
-                            className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm font-mono tabular-nums outline-none"
-                            required
-                          />
-                        </div>
-                        <div className="sm:col-span-2 bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <label className="block text-xs font-semibold text-[#6E675F] mb-1.5">
-                            Dating Fee — Night (Ks)
-                          </label>
-                          <input
-                            type="number"
-                            value={draftPricing.feeNight}
-                            onChange={(e) =>
-                              setDraftPricing({
-                                ...draftPricing,
-                                feeNight: Number(e.target.value),
-                              })
-                            }
-                            className="w-full p-2.5 bg-white border border-[#E6DFD3] rounded-lg text-sm font-mono tabular-nums outline-none"
-                            required
-                          />
-                        </div>
-                      </div>
-                      <div className="flex gap-2 pt-2">
-                        <button
-                          type="button"
-                          onClick={handleSavePricing}
-                          disabled={isConfigSaving}
-                          className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#1E2126] disabled:opacity-50 transition-colors flex items-center justify-center gap-2"
-                        >
-                          {isConfigSaving ? (
-                            'Saving...'
-                          ) : (
-                            <>
-                              <Save size={14} />
-                              <span>Save Pricing</span>
-                            </>
-                          )}
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => setIsEditingPricing(false)}
-                          className="px-6 bg-[#FAF8F5] text-[#5C564E] rounded-lg text-xs font-semibold border border-[#E6DFD3]"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <div className="bg-[#F5EFE6] p-4 rounded-lg border border-[#E6DFD3] flex items-center justify-between">
-                        <span className="text-xs font-semibold text-[#9E7B36]">
-                          Payment Account
-                        </span>
-                        <span className="text-sm font-mono font-semibold text-[#0C0D0E]">
-                          {appConfig.paymentInfo || '-'}
-                        </span>
-                      </div>
-                      <div className="grid grid-cols-2 gap-4">
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <span className="text-xs text-[#6E675F] block mb-1">Client ID Fee</span>
-                          <span className="text-base font-mono font-semibold text-[#0C0D0E] tabular-nums">
-                            {Number(appConfig.clientIdFee || 0).toLocaleString()} Ks
-                          </span>
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <span className="text-xs text-[#6E675F] block mb-1">
-                            Private Photo Fee
-                          </span>
-                          <span className="text-base font-mono font-semibold text-[#0C0D0E] tabular-nums">
-                            {Number(appConfig.privFee || 0).toLocaleString()} Ks
-                          </span>
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <span className="text-xs text-[#6E675F] block mb-1">Section Fee</span>
-                          <span className="text-base font-mono font-semibold text-[#0C0D0E] tabular-nums">
-                            {Number(appConfig.feeSec || 0).toLocaleString()} Ks
-                          </span>
-                        </div>
-                        <div className="bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <span className="text-xs text-[#6E675F] block mb-1">Day Fee</span>
-                          <span className="text-base font-mono font-semibold text-[#0C0D0E] tabular-nums">
-                            {Number(appConfig.feeDay || 0).toLocaleString()} Ks
-                          </span>
-                        </div>
-                        <div className="col-span-2 bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3]">
-                          <span className="text-xs text-[#6E675F] block mb-1">Night Fee</span>
-                          <span className="text-base font-mono font-semibold text-[#0C0D0E] tabular-nums">
-                            {Number(appConfig.feeNight || 0).toLocaleString()} Ks
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Locations Master Catalog Quick Summary Card */}
-              <div className="space-y-6">
-                <div className="bg-white p-6 rounded-xl border border-[#E6DFD3] space-y-5">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="font-mono text-[11px] tracking-[0.14em] text-[#9E7B36] font-semibold mb-1">
-                        MYANMAR 330 MASTER LIST
-                      </p>
-                      <h3 className="font-serif text-xl font-semibold text-[#0C0D0E] flex items-center gap-2">
-                        <MapPin size={17} className="text-[#9E7B36]" />
-                        <span>မြို့နှင့် မြို့နယ်များ စီမံခန့်ခွဲရန်</span>
+              <div className="grid grid-cols-1 xl:grid-cols-3 gap-8">
+                <div className="xl:col-span-2">
+                  {/* Requirements & Rules */}
+                  <div className="bg-white p-6 sm:p-8 rounded-xl border border-[#E6DFD3]">
+                    <div className="flex justify-between items-center mb-6 border-b border-[#EFECE6] pb-4">
+                      <h3 className="font-serif text-2xl font-semibold text-[#0C0D0E] flex items-center gap-2.5">
+                        <FileText size={18} className="text-[#9E7B36]" />
+                        <span>လျှောက်ထားသူများအတွက် စည်းကမ်းချက်များ</span>
                       </h3>
+                      {!isEditingRules && (
+                        <button
+                          type="button"
+                          onClick={startEditRules}
+                          className="flex items-center gap-1.5 bg-[#FAF8F5] hover:bg-[#F5EFE6] text-[#0C0D0E] px-4 py-2 rounded-lg text-xs font-semibold border border-[#E6DFD3] transition-colors cursor-pointer"
+                        >
+                          <Pencil size={13} />
+                          <span>Edit</span>
+                        </button>
+                      )}
                     </div>
+
+                    {isEditingRules ? (
+                      <div className="space-y-4">
+                        <div>
+                          <label className="block text-xs font-semibold text-[#0C0D0E] mb-2">
+                            လိုအပ်သည့်အချက်များ (Requirements)
+                          </label>
+                          <textarea
+                            rows={4}
+                            value={draftRules.reqText}
+                            onChange={(e) =>
+                              setDraftRules({ ...draftRules, reqText: e.target.value })
+                            }
+                            className="w-full p-4 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E] leading-relaxed"
+                            required
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-semibold text-[#0C0D0E] mb-2">
+                            စည်းမျဉ်းစည်းကမ်းများ (Rules)
+                          </label>
+                          <textarea
+                            rows={4}
+                            value={draftRules.ruleText}
+                            onChange={(e) =>
+                              setDraftRules({ ...draftRules, ruleText: e.target.value })
+                            }
+                            className="w-full p-4 bg-[#FAF8F5] border border-[#E6DFD3] rounded-lg text-sm outline-none focus:border-[#0C0D0E] leading-relaxed"
+                            required
+                          />
+                        </div>
+                        <div className="flex gap-2 pt-2">
+                          <button
+                            type="button"
+                            onClick={handleSaveRules}
+                            disabled={isConfigSaving}
+                            className="flex-1 bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#1E2126] disabled:opacity-50 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                          >
+                            {isConfigSaving ? (
+                              'Saving...'
+                            ) : (
+                              <>
+                                <Save size={14} />
+                                <span>Save Changes</span>
+                              </>
+                            )}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsEditingRules(false)}
+                            className="px-6 bg-[#FAF8F5] text-[#5C564E] rounded-lg text-xs font-semibold border border-[#E6DFD3] cursor-pointer"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-5">
+                        <div>
+                          <span className="text-xs font-semibold text-[#6E675F] block mb-2">
+                            လိုအပ်သည့်အချက်များ
+                          </span>
+                          <div className="text-xs sm:text-sm bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3] whitespace-pre-wrap text-[#0C0D0E] leading-relaxed">
+                            {appConfig.reqText || '-'}
+                          </div>
+                        </div>
+                        <div>
+                          <span className="text-xs font-semibold text-[#6E675F] block mb-2">
+                            စည်းမျဉ်းစည်းကမ်းများ
+                          </span>
+                          <div className="text-xs sm:text-sm bg-[#FAF8F5] p-4 rounded-lg border border-[#E6DFD3] whitespace-pre-wrap text-[#0C0D0E] leading-relaxed">
+                            {appConfig.ruleText || '-'}
+                          </div>
+                        </div>
+                      </div>
+                    )}
                   </div>
+                </div>
 
-                  <p className="text-xs text-[#6E675F] leading-relaxed">
-                    Date Boy Registration (Web &amp; Telegram Bot) Dropdown များအတွက်
-                    မြန်မာနိုင်ငံရှိ တိုင်း/ပြည်နယ် (၁၅) ခုနှင့် မြို့နယ် (၃၃၀) လုံးကို
-                    သီးသန့် <strong>မြို့ / မြို့နယ်များ</strong> Tab တွင် စုစည်းထားပါသည်။
-                  </p>
+                {/* Locations Master Catalog Quick Summary Card */}
+                <div className="space-y-6">
+                  <div className="bg-white p-6 rounded-xl border border-[#E6DFD3] space-y-5">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="font-mono text-[11px] tracking-[0.14em] text-[#9E7B36] font-semibold mb-1">
+                          MYANMAR 330 MASTER LIST
+                        </p>
+                        <h3 className="font-serif text-xl font-semibold text-[#0C0D0E] flex items-center gap-2">
+                          <MapPin size={17} className="text-[#9E7B36]" />
+                          <span>မြို့နှင့် မြို့နယ်များ စီမံခန့်ခွဲရန်</span>
+                        </h3>
+                      </div>
+                    </div>
 
-                  <div className="grid grid-cols-3 gap-3 text-center">
-                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
-                      <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
-                        {catalogStats.totalCities}
-                      </span>
-                      <span className="text-[11px] text-[#6E675F]">တိုင်း/ပြည်နယ်</span>
+                    <p className="text-xs text-[#6E675F] leading-relaxed">
+                      Date Boy Registration (Web &amp; Telegram Bot) Dropdown များအတွက်
+                      မြန်မာနိုင်ငံရှိ တိုင်း/ပြည်နယ် (၁၅) ခုနှင့် မြို့နယ် (၃၃၀) လုံးကို
+                      သီးသန့် <strong>မြို့ / မြို့နယ်များ</strong> Tab တွင် စုစည်းထားပါသည်။
+                    </p>
+
+                    <div className="grid grid-cols-3 gap-3 text-center">
+                      <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                        <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
+                          {catalogStats.totalCities}
+                        </span>
+                        <span className="text-[11px] text-[#6E675F]">တိုင်း/ပြည်နယ်</span>
+                      </div>
+                      <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                        <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
+                          {catalogStats.totalTownships}
+                        </span>
+                        <span className="text-[11px] text-[#6E675F]">မြို့နယ်များ</span>
+                      </div>
+                      <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
+                        <span
+                          className={`font-mono text-lg font-bold tabular-nums block ${
+                            pendingLocations.length > 0 ? 'text-amber-600' : 'text-[#0C0D0E]'
+                          }`}
+                        >
+                          {pendingLocations.length}
+                        </span>
+                        <span className="text-[11px] text-[#6E675F]">Requests</span>
+                      </div>
                     </div>
-                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
-                      <span className="font-mono text-lg font-bold text-[#0C0D0E] tabular-nums block">
-                        {catalogStats.totalTownships}
-                      </span>
-                      <span className="text-[11px] text-[#6E675F]">မြို့နယ်များ</span>
-                    </div>
-                    <div className="bg-[#FAF8F5] p-3.5 rounded-lg border border-[#E6DFD3]">
-                      <span
-                        className={`font-mono text-lg font-bold tabular-nums block ${
-                          pendingLocations.length > 0 ? 'text-amber-600' : 'text-[#0C0D0E]'
-                        }`}
-                      >
-                        {pendingLocations.length}
-                      </span>
-                      <span className="text-[11px] text-[#6E675F]">Requests</span>
-                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('locations')}
+                      className="w-full bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors flex justify-center items-center gap-2 cursor-pointer"
+                    >
+                      <MapPin size={15} />
+                      <span>မြို့ / မြို့နယ် စာရင်း (၃၃၀) စီမံခန့်ခွဲမည်</span>
+                    </button>
                   </div>
-
-                  <button
-                    type="button"
-                    onClick={() => setActiveTab('locations')}
-                    className="w-full bg-[#0C0D0E] text-[#FAF8F5] py-3 rounded-lg text-xs font-semibold hover:bg-[#C5A059] hover:text-[#0C0D0E] transition-colors flex justify-center items-center gap-2 cursor-pointer"
-                  >
-                    <MapPin size={15} />
-                    <span>မြို့ / မြို့နယ် စာရင်း (၃၃၀) စီမံခန့်ခွဲမည်</span>
-                  </button>
                 </div>
               </div>
             </div>

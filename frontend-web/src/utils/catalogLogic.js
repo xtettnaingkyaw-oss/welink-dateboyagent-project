@@ -929,4 +929,290 @@ export function formatBulkMessageForRecipient(templateText, boy, headerTitle = '
   return body;
 }
 
+export const DEFAULT_DATING_PACKAGES = [
+  {
+    id: 'sec',
+    icon: '🕒',
+    title: 'Section',
+    nameMm: 'Section (အချိန်ပိုင်း)',
+    duration: '၂ နာရီ ~ ၃ နာရီ (1 Session)',
+    price: 70000,
+    description: 'အချိန်တို သီးသန့်တွေ့ဆုံမှု (၁) ကြိမ် / Private Session',
+    badge: 'လူကြိုက်များသည်',
+    enabled: true,
+  },
+  {
+    id: 'day',
+    icon: '☀️',
+    title: 'Day',
+    nameMm: 'Day (နေ့ပိုင်း အချိန်ပြည့်)',
+    duration: 'နေ့ပိုင်း ၈ နာရီ (9:00 AM – 5:00 PM)',
+    price: 300000,
+    description: 'နေ့ခင်းပိုင်း အပြင်သွား၊ စားသောက်၊ အပန်းဖြေ အဖော်လိုက်ပေးခြင်း',
+    badge: '',
+    enabled: true,
+  },
+  {
+    id: 'night',
+    icon: '🌙',
+    title: 'Night',
+    nameMm: 'Night (ညပိုင်း / Overnight)',
+    duration: 'ညပိုင်း ၁၂ နာရီ / Overnight (8:00 PM – 8:00 AM)',
+    price: 300000,
+    description: 'ညပိုင်း အချိန်ပြည့် သီးသန့် အဖော်လိုက်ပေးခြင်း (Overnight)',
+    badge: 'Best Value',
+    enabled: true,
+  },
+];
+
+export const DURATION_QUICK_PRESETS = [
+  '၂ နာရီ ~ ၃ နာရီ (1 Session)',
+  '၄ နာရီ (Half-Day Session)',
+  'နေ့ပိုင်း ၈ နာရီ (9:00 AM – 5:00 PM)',
+  'ညပိုင်း ၁၂ နာရီ / Overnight (8:00 PM – 8:00 AM)',
+  '၂၄ နာရီ (Full Day & Overnight VIP)',
+];
+
+export const PAYMENT_METHOD_PRESETS = [
+  'KBZPay (KPay)',
+  'WavePay',
+  'AYA Pay',
+  'CB Pay',
+  'KBZ Bank',
+  'AYA Bank',
+  'UAB Pay',
+];
+
+export function formatKyats(amount) {
+  const num = Number(amount);
+  if (!Number.isFinite(num) || num < 0) return '0';
+  return Math.round(num).toLocaleString('en-US');
+}
+
+export function calculatePackageDeposit(price, depositPercent = 50) {
+  const total = Math.max(0, Math.round(Number(price) || 0));
+  const pctRaw = Number(depositPercent);
+  const pct = Number.isFinite(pctRaw) && pctRaw >= 0 && pctRaw <= 100 ? Math.round(pctRaw) : 50;
+  const depositAmount = Math.round((total * pct) / 100);
+  const remainingAmount = Math.max(0, total - depositAmount);
+  return {
+    total,
+    depositPercent: pct,
+    depositAmount,
+    remainingAmount,
+  };
+}
+
+export function parseLegacyPaymentInfo(paymentInfo = '') {
+  const raw = String(paymentInfo || '').trim();
+  if (!raw) {
+    return [
+      {
+        id: 'acc_default_1',
+        method: 'KBZPay (KPay)',
+        accountNumber: '09123456789',
+        accountName: 'WE LINK Concierge',
+        enabled: true,
+      },
+    ];
+  }
+
+  const lines = raw
+    .split(/\r?\n|\/|;|\|/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const parsed = lines.map((line, index) => {
+    // Match patterns like "KPay: 09123456789 (Name)" or "WavePay - 09987654321 (U Mya)"
+    const colonIdx = line.indexOf(':');
+    let method = 'KBZPay (KPay)';
+    let rest = line;
+    if (colonIdx > 0 && colonIdx < 28) {
+      const m = line.slice(0, colonIdx).trim();
+      method = /^kpay$/i.test(m) ? 'KBZPay (KPay)' : m;
+      rest = line.slice(colonIdx + 1).trim();
+    }
+
+    const nameMatch = rest.match(/\(([^)]+)\)\s*$/);
+    let accountName = '';
+    if (nameMatch) {
+      accountName = nameMatch[1].trim();
+      rest = rest.slice(0, nameMatch.index).trim();
+    }
+
+    return {
+      id: `acc_legacy_${index + 1}`,
+      method: method || 'KBZPay (KPay)',
+      accountNumber: rest || line,
+      accountName: accountName || '',
+      enabled: true,
+    };
+  });
+
+  return parsed.length > 0
+    ? parsed
+    : [
+        {
+          id: 'acc_default_1',
+          method: 'KBZPay (KPay)',
+          accountNumber: raw,
+          accountName: '',
+          enabled: true,
+        },
+      ];
+}
+
+export function formatPaymentAccountsToInfoString(paymentAccounts = [], fallbackInfo = '') {
+  if (!Array.isArray(paymentAccounts) || paymentAccounts.length === 0) {
+    return String(fallbackInfo || '').trim();
+  }
+  const active = paymentAccounts.filter(
+    (acc) => acc && acc.enabled !== false && String(acc.accountNumber || '').trim()
+  );
+  if (active.length === 0) {
+    return String(fallbackInfo || '').trim();
+  }
+  return active
+    .map((acc) => {
+      const method = String(acc.method || 'KPay').trim();
+      const number = String(acc.accountNumber || '').trim();
+      const holder = String(acc.accountName || '').trim();
+      return `${method}: ${number}${holder ? ` (${holder})` : ''}`;
+    })
+    .join('\n');
+}
+
+export function normalizePricingConfig(rawConfig = {}) {
+  const safe = rawConfig && typeof rawConfig === 'object' ? rawConfig : {};
+  const clientIdFee = Number.isFinite(Number(safe.clientIdFee))
+    ? Math.max(0, Number(safe.clientIdFee))
+    : 10000;
+  const privFee = Number.isFinite(Number(safe.privFee))
+    ? Math.max(0, Number(safe.privFee))
+    : 10000;
+  const feeSec = Number.isFinite(Number(safe.feeSec))
+    ? Math.max(0, Number(safe.feeSec))
+    : 70000;
+  const feeDay = Number.isFinite(Number(safe.feeDay))
+    ? Math.max(0, Number(safe.feeDay))
+    : 300000;
+  const feeNight = Number.isFinite(Number(safe.feeNight))
+    ? Math.max(0, Number(safe.feeNight))
+    : 300000;
+
+  const pctRaw = Number(safe.depositPercent);
+  const depositPercent =
+    Number.isFinite(pctRaw) && pctRaw >= 0 && pctRaw <= 100 ? Math.round(pctRaw) : 50;
+
+  let datingPackages = [];
+  if (Array.isArray(safe.datingPackages) && safe.datingPackages.length > 0) {
+    datingPackages = safe.datingPackages
+      .filter((pkg) => pkg && typeof pkg === 'object')
+      .map((pkg, idx) => {
+        const id = String(pkg.id || `pkg_${idx + 1}`).trim();
+        const defaultMatch = DEFAULT_DATING_PACKAGES.find((d) => d.id === id);
+        const fallbackPrice =
+          id === 'sec'
+            ? feeSec
+            : id === 'day'
+              ? feeDay
+              : id === 'night'
+                ? feeNight
+                : defaultMatch?.price || 100000;
+        const priceNum = Number(pkg.price);
+        return {
+          id,
+          icon: String(pkg.icon || defaultMatch?.icon || '💎').trim(),
+          title: String(pkg.title || defaultMatch?.title || `Package ${idx + 1}`).trim(),
+          nameMm: String(
+            pkg.nameMm || pkg.title || defaultMatch?.nameMm || `Package ${idx + 1}`
+          ).trim(),
+          duration: String(
+            pkg.duration || defaultMatch?.duration || 'သတ်မှတ်ချိန်အတိုင်း'
+          ).trim(),
+          price: Number.isFinite(priceNum) && priceNum >= 0 ? Math.round(priceNum) : fallbackPrice,
+          description: String(
+            pkg.description !== undefined ? pkg.description : defaultMatch?.description || ''
+          ).trim(),
+          badge: String(pkg.badge !== undefined ? pkg.badge : defaultMatch?.badge || '').trim(),
+          enabled: pkg.enabled !== false,
+        };
+      });
+  } else {
+    datingPackages = DEFAULT_DATING_PACKAGES.map((pkg) => ({
+      ...pkg,
+      price:
+        pkg.id === 'sec'
+          ? feeSec
+          : pkg.id === 'day'
+            ? feeDay
+            : pkg.id === 'night'
+              ? feeNight
+              : pkg.price,
+    }));
+  }
+
+  let paymentAccounts = [];
+  if (Array.isArray(safe.paymentAccounts) && safe.paymentAccounts.length > 0) {
+    paymentAccounts = safe.paymentAccounts
+      .filter((acc) => acc && typeof acc === 'object')
+      .map((acc, idx) => ({
+        id: String(acc.id || `acc_${idx + 1}`),
+        method: String(acc.method || 'KBZPay (KPay)').trim(),
+        accountNumber: String(acc.accountNumber || '').trim(),
+        accountName: String(acc.accountName || '').trim(),
+        enabled: acc.enabled !== false,
+      }));
+  } else {
+    paymentAccounts = parseLegacyPaymentInfo(safe.paymentInfo);
+  }
+
+  const paymentInfo =
+    formatPaymentAccountsToInfoString(paymentAccounts, safe.paymentInfo) ||
+    String(safe.paymentInfo || 'Admin ကိုဆက်သွယ်ပါ').trim();
+
+  const secPkg = datingPackages.find((p) => p.id === 'sec') || datingPackages[0];
+  const dayPkg = datingPackages.find((p) => p.id === 'day') || datingPackages[1];
+  const nightPkg = datingPackages.find((p) => p.id === 'night') || datingPackages[2];
+
+  const activePackages = datingPackages.filter((p) => p.enabled !== false);
+
+  return {
+    clientIdFee,
+    clientIdNote: String(
+      safe.clientIdNote || 'Date Boy များ ရှာဖွေကြည့်ရှုရန် VIP Client ID ကုဒ် (တစ်သက်တာ အသုံးပြုခွင့်)'
+    ).trim(),
+    privFee,
+    privPhotoNote: String(
+      safe.privPhotoNote || 'ရွေးချယ်ထားသော Date Boy ၏ သီးသန့် Private ပုံနှင့် Video ကြည့်ရှုခွင့်'
+    ).trim(),
+    depositPercent,
+    feeSec: secPkg ? secPkg.price : feeSec,
+    feeDay: dayPkg ? dayPkg.price : feeDay,
+    feeNight: nightPkg ? nightPkg.price : feeNight,
+    datingPackages,
+    activePackages: activePackages.length > 0 ? activePackages : datingPackages,
+    paymentAccounts,
+    paymentInfo,
+  };
+}
+
+export function serializePricingConfigForFirestore(draft = {}) {
+  const norm = normalizePricingConfig(draft);
+  return {
+    clientIdFee: norm.clientIdFee,
+    clientIdNote: norm.clientIdNote,
+    privFee: norm.privFee,
+    privPhotoNote: norm.privPhotoNote,
+    depositPercent: norm.depositPercent,
+    feeSec: norm.feeSec,
+    feeDay: norm.feeDay,
+    feeNight: norm.feeNight,
+    datingPackages: norm.datingPackages,
+    paymentAccounts: norm.paymentAccounts,
+    paymentInfo: norm.paymentInfo,
+  };
+}
+
+
 

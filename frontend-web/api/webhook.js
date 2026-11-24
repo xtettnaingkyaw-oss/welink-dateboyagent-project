@@ -369,20 +369,154 @@ async function getAdminChatId() {
   return adminDoc.exists() ? adminDoc.data().chatId : null;
 }
 
+const DEFAULT_BOT_PACKAGES = [
+  {
+    id: "sec",
+    icon: "🕒",
+    title: "Section",
+    nameMm: "Section (အချိန်ပိုင်း)",
+    duration: "၂ နာရီ ~ ၃ နာရီ (1 Session)",
+    price: 70000,
+    description: "အချိန်တို သီးသန့်တွေ့ဆုံမှု (၁) ကြိမ် / Private Session",
+    badge: "လူကြိုက်များသည်",
+    enabled: true,
+  },
+  {
+    id: "day",
+    icon: "☀️",
+    title: "Day",
+    nameMm: "Day (နေ့ပိုင်း အချိန်ပြည့်)",
+    duration: "နေ့ပိုင်း ၈ နာရီ (9:00 AM – 5:00 PM)",
+    price: 300000,
+    description: "နေ့ခင်းပိုင်း အပြင်သွား၊ စားသောက်၊ အပန်းဖြေ အဖော်လိုက်ပေးခြင်း",
+    badge: "",
+    enabled: true,
+  },
+  {
+    id: "night",
+    icon: "🌙",
+    title: "Night",
+    nameMm: "Night (ညပိုင်း / Overnight)",
+    duration: "ညပိုင်း ၁၂ နာရီ / Overnight (8:00 PM – 8:00 AM)",
+    price: 300000,
+    description: "ညပိုင်း အချိန်ပြည့် သီးသန့် အဖော်လိုက်ပေးခြင်း (Overnight)",
+    badge: "Best Value",
+    enabled: true,
+  },
+];
+
+function formatBotKyats(amount) {
+  const num = Number(amount);
+  if (!Number.isFinite(num) || num < 0) return "0";
+  return Math.round(num).toLocaleString("en-US");
+}
+
+function normalizeBotAppConfig(raw = {}) {
+  const safe = raw && typeof raw === "object" ? raw : {};
+  const clientIdFee = Number.isFinite(Number(safe.clientIdFee))
+    ? Math.max(0, Number(safe.clientIdFee))
+    : 10000;
+  const privFee = Number.isFinite(Number(safe.privFee))
+    ? Math.max(0, Number(safe.privFee))
+    : 10000;
+  const feeSec = Number.isFinite(Number(safe.feeSec))
+    ? Math.max(0, Number(safe.feeSec))
+    : 70000;
+  const feeDay = Number.isFinite(Number(safe.feeDay))
+    ? Math.max(0, Number(safe.feeDay))
+    : 300000;
+  const feeNight = Number.isFinite(Number(safe.feeNight))
+    ? Math.max(0, Number(safe.feeNight))
+    : 300000;
+  const pctRaw = Number(safe.depositPercent);
+  const depositPercent =
+    Number.isFinite(pctRaw) && pctRaw >= 0 && pctRaw <= 100 ? Math.round(pctRaw) : 50;
+
+  let datingPackages = [];
+  if (Array.isArray(safe.datingPackages) && safe.datingPackages.length > 0) {
+    datingPackages = safe.datingPackages
+      .filter((p) => p && typeof p === "object")
+      .map((pkg, idx) => {
+        const id = String(pkg.id || `pkg_${idx + 1}`).trim();
+        const def = DEFAULT_BOT_PACKAGES.find((d) => d.id === id);
+        const fallbackPrice =
+          id === "sec"
+            ? feeSec
+            : id === "day"
+              ? feeDay
+              : id === "night"
+                ? feeNight
+                : def?.price || 100000;
+        const priceNum = Number(pkg.price);
+        return {
+          id,
+          icon: String(pkg.icon || def?.icon || "💎").trim(),
+          title: String(pkg.title || def?.title || `Package ${idx + 1}`).trim(),
+          nameMm: String(pkg.nameMm || pkg.title || def?.nameMm || `Package ${idx + 1}`).trim(),
+          duration: String(pkg.duration || def?.duration || "သတ်မှတ်ချိန်အတိုင်း").trim(),
+          price: Number.isFinite(priceNum) && priceNum >= 0 ? Math.round(priceNum) : fallbackPrice,
+          description: String(
+            pkg.description !== undefined ? pkg.description : def?.description || ""
+          ).trim(),
+          badge: String(pkg.badge !== undefined ? pkg.badge : def?.badge || "").trim(),
+          enabled: pkg.enabled !== false,
+        };
+      });
+  } else {
+    datingPackages = DEFAULT_BOT_PACKAGES.map((pkg) => ({
+      ...pkg,
+      price:
+        pkg.id === "sec"
+          ? feeSec
+          : pkg.id === "day"
+            ? feeDay
+            : pkg.id === "night"
+              ? feeNight
+              : pkg.price,
+    }));
+  }
+
+  const activePackages = datingPackages.filter((p) => p.enabled !== false);
+  const paymentAccounts = Array.isArray(safe.paymentAccounts)
+    ? safe.paymentAccounts.filter(
+        (a) => a && a.enabled !== false && String(a.accountNumber || "").trim()
+      )
+    : [];
+
+  return {
+    ...safe,
+    paymentInfo: String(safe.paymentInfo || "Admin ကိုဆက်သွယ်ပါ").trim(),
+    clientIdFee,
+    privFee,
+    feeSec,
+    feeDay,
+    feeNight,
+    depositPercent,
+    datingPackages,
+    activePackages: activePackages.length > 0 ? activePackages : datingPackages,
+    paymentAccounts,
+    reqText: safe.reqText || "၁။ အသက် ၂၁ နှစ်ပြည့်ပြီးသူ ဖြစ်ရပါမည်။",
+    ruleText: safe.ruleText || "၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရပါမည်။",
+  };
+}
+
+function formatTelegramPaymentAccountsHtml(config) {
+  if (Array.isArray(config?.paymentAccounts) && config.paymentAccounts.length > 0) {
+    return config.paymentAccounts
+      .map((acc) => {
+        const method = escapeHTML(String(acc.method || "KPay").trim());
+        const num = escapeHTML(String(acc.accountNumber || "").trim());
+        const holder = String(acc.accountName || "").trim();
+        return `• <b>${method}:</b> <code>${num}</code>${holder ? ` (${escapeHTML(holder)})` : ""}`;
+      })
+      .join("\n");
+  }
+  return `<code>${escapeHTML(config?.paymentInfo || "Admin ကိုဆက်သွယ်ပါ")}</code>`;
+}
+
 async function getAppConfig() {
   const cDoc = await getDoc(doc(db, "settings", "app_config"));
-  return cDoc.exists()
-    ? cDoc.data()
-    : {
-        paymentInfo: "Admin ကိုဆက်သွယ်ပါ",
-        privFee: 5000,
-        feeSec: 30000,
-        feeDay: 70000,
-        feeNight: 100000,
-        clientIdFee: 10000,
-        reqText: "၁။ အသက် ၂၁ နှစ်ပြည့်ပြီးသူ ဖြစ်ရပါမည်။",
-        ruleText: "၁။ အမှန်တကယ် လုပ်ကိုင်လိုသူ ဖြစ်ရပါမည်။",
-      };
+  return normalizeBotAppConfig(cDoc.exists() ? cDoc.data() : {});
 }
 
 const MAIN_MENU_KEYBOARD = {
@@ -735,7 +869,17 @@ async function approveOrRejectDatingBooking({
     bookingData.preferredDate || bookingData.preferredTime
       ? `${bookingData.preferredDate || ""} ${bookingData.preferredTime ? "· " + bookingData.preferredTime : ""}`.trim()
       : "Admin မှ ဆက်သွယ်ညှိနှိုင်းပေးပါမည်";
-  const durationInfo = bookingData.duration || "Standard Arrangement";
+  const packageTitleInfo = bookingData.packageName || bookingData.duration || "Standard Arrangement";
+  const packageDurationInfo = bookingData.packageDuration || "";
+  const packagePriceNum = Number(bookingData.packagePrice || 0);
+  const depositAmountNum = Number(bookingData.depositAmount || 0);
+  const priceLineHtml =
+    packagePriceNum > 0
+      ? `\n💰 <b>Package ဈေးနှုန်း:</b> <b>${formatBotKyats(packagePriceNum)} ကျပ်</b>${depositAmountNum > 0 ? ` (စရံ ${formatBotKyats(depositAmountNum)} ကျပ် ပေးသွင်းပြီး)` : ""}`
+      : "";
+  const durationLineHtml = packageDurationInfo
+    ? `\n⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDurationInfo)}</b>`
+    : "";
   const notesInfo = bookingData.notes || "-";
 
   if (bookingId) {
@@ -756,16 +900,18 @@ async function approveOrRejectDatingBooking({
   let adminNotified = false;
 
   if (isApprove) {
-    // 1. Notify the Date Boy via Telegram Bot with the Client Type (Girl or LGBT)!
+    // 1. Notify the Date Boy via Telegram Bot with the Client Type (Girl or LGBT) and selected Package Card!
     if (boyChatId && String(boyChatId) !== "0") {
       const boyNoticeMsg =
         `🎉 <b>Dating Request အသစ် ရရှိပါပြီ! (WE LINK Admin Approved)</b> 🎉\n\n` +
         `မင်္ဂလာပါ <b>${escapeHTML(boyName)} (${escapeHTML(boyCode)})</b> ခင်ဗျာ — သင့်အား ဧည့်သည်တစ်ဦးမှ ခေါ်ယူရန် Admin မှ အတည်ပြုပေးလိုက်ပါပြီ!\n\n` +
         `🔖 <b>Booking Ref:</b> <code>${escapeHTML(bookingRef)}</code>\n` +
         `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
-        `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
+        `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageTitleInfo)}</b>` +
+        durationLineHtml +
+        priceLineHtml +
+        `\n📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
         `📅 <b>ရက်စွဲ / အချိန်:</b> ${escapeHTML(scheduleInfo)}\n` +
-        `🕒 <b>Package:</b> ${escapeHTML(durationInfo)}\n` +
         `📝 <b>မှတ်ချက်:</b> ${escapeHTML(notesInfo)}\n\n` +
         `📞 <i>တွေ့ဆုံရမည့် နေရာနှင့် အချိန်အသေးစိတ်ကို WE LINK Admin မှ တိုက်ရိုက်ဆက်သွယ် ချိတ်ဆက်ပေးပါမည်။ အဆင်သင့်ပြင်ဆင်ထားပေးပါ ခင်ဗျာ။</i>`;
 
@@ -779,8 +925,11 @@ async function approveOrRejectDatingBooking({
         `✅ <b>ငွေပေးချေမှုနှင့် Dating Request အတည်ပြုပြီးပါပြီ! (${escapeHTML(bookingRef)})</b> 🎉\n\n` +
         `👤 <b>Date Boy:</b> <b>${escapeHTML(boyCode)}</b>\n` +
         `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
-        `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
-        `✅ သက်ဆိုင်ရာ Date Boy (<b>${escapeHTML(boyCode)}</b>) ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့်တကွ အကြောင်းကြားပြီး ဖြစ်ပါသည်။ Admin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`;
+        `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageTitleInfo)}</b>` +
+        durationLineHtml +
+        priceLineHtml +
+        `\n📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
+        `✅ သက်ဆိုင်ရာ Date Boy (<b>${escapeHTML(boyCode)}</b>) ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့် Package အချက်အလက်များကို အကြောင်းကြားပြီး ဖြစ်ပါသည်။ Admin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`;
       const clientSendRes = await sendMessage(
         resolvedClientChatId,
         clientApproveMsg,
@@ -812,8 +961,10 @@ async function approveOrRejectDatingBooking({
         `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
         `🧑‍💼 <b>Client အမည်/ဆက်သွယ်ရန်:</b> ${escapeHTML(clientName)} (${escapeHTML(clientContact)})\n` +
         `📅 <b>ရက်စွဲ/အချိန်:</b> ${escapeHTML(scheduleInfo)}\n` +
-        `🕒 <b>Package:</b> ${escapeHTML(durationInfo)}\n` +
-        `🛡️ <b>အတည်ပြုသူ:</b> ${escapeHTML(adminActor)}` +
+        `📦 <b>Package:</b> ${escapeHTML(packageTitleInfo)}` +
+        durationLineHtml +
+        priceLineHtml +
+        `\n🛡️ <b>အတည်ပြုသူ:</b> ${escapeHTML(adminActor)}` +
         clientLinkHtml +
         boyLinkHtml +
         `\n\n${boyNotiStatus}`;
@@ -1513,6 +1664,17 @@ export default async function handler(req, res) {
       if (adminChatId) {
         const clientTypeLabel = formatBookingClientTypeLabel(reqBody.clientType);
         const boyPrefLabel = formatClientPreferenceLabel(reqBody.dateBoyPreference);
+        const pkgName = reqBody.packageName || reqBody.duration || "-";
+        const pkgDurationLine = reqBody.packageDuration
+          ? `\n⏱️ <b>သတ်မှတ်ကြာချိန်:</b> ${escapeHTML(reqBody.packageDuration)}`
+          : "";
+        const pkgPriceNum = Number(reqBody.packagePrice || 0);
+        const depNum = Number(reqBody.depositAmount || 0);
+        const pkgPriceLine =
+          pkgPriceNum > 0
+            ? `\n💰 <b>ဈေးနှုန်း / စရံ:</b> <b>${formatBotKyats(pkgPriceNum)} Ks</b>${depNum > 0 ? ` (စရံ ${formatBotKyats(depNum)} Ks)` : ""}`
+            : "";
+
         const msg =
           `🛎️ <b>New Web Concierge Reservation (${escapeHTML(reqBody.bookingRef || "WL-BOOKING")})</b>\n\n` +
           `👤 <b>Date Boy:</b> ${escapeHTML(reqBody.dateBoyName)} (<b>${escapeHTML(reqBody.dateBoyCode)}</b>)\n` +
@@ -1522,9 +1684,11 @@ export default async function handler(req, res) {
           `👤 <b>Client အမည်:</b> ${escapeHTML(reqBody.clientName)}\n` +
           `📞 <b>ဆက်သွယ်ရန်:</b> ${escapeHTML(reqBody.clientContact)}\n` +
           `📅 <b>ရက်စွဲ/အချိန်:</b> ${escapeHTML(reqBody.preferredDate)} · ${escapeHTML(reqBody.preferredTime)}\n` +
-          `🕒 <b>Package:</b> ${escapeHTML(reqBody.duration)}\n` +
-          `📝 <b>မှတ်ချက်:</b> ${escapeHTML(reqBody.notes || "-")}\n\n` +
-          `<i>Approve နှိပ်လိုက်ပါက သက်ဆိုင်ရာ Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (${escapeHTML(formatBookingClientTypeShortBadge(reqBody.clientType))}) နှင့်တကွ အလိုအလျောက် အကြောင်းကြားစာ ပေးပို့ပေးပါမည်။</i>`;
+          `📦 <b>Package:</b> <b>${escapeHTML(pkgName)}</b>` +
+          pkgDurationLine +
+          pkgPriceLine +
+          `\n📝 <b>မှတ်ချက်:</b> ${escapeHTML(reqBody.notes || "-")}\n\n` +
+          `<i>Approve နှိပ်လိုက်ပါက သက်ဆိုင်ရာ Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (${escapeHTML(formatBookingClientTypeShortBadge(reqBody.clientType))}) နှင့် Package အချက်အလက်များကို အလိုအလျောက် အကြောင်းကြားစာ ပေးပို့ပေးပါမည်။</i>`;
 
         const keyboard = reqBody.bookingId
           ? {
@@ -2796,7 +2960,11 @@ export default async function handler(req, res) {
       await setDoc(stateRef, { step: "WAIT_CLIENT_ID_SS", data: {} }, { merge: true });
       await sendMessage(
         chatId,
-        `💳 Client ID ရယူရန်အတွက် ကျသင့်ငွေမှာ <b>${config.clientIdFee} ကျပ်</b> ဖြစ်ပါသည်။\n\nအောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
+        `💳 <b>VIP Client ID ဝယ်ယူရန်</b>\n\n` +
+          `💰 <b>ကျသင့်ငွေ:</b> <b>${formatBotKyats(config.clientIdFee)} ကျပ်</b>\n\n` +
+          `🏦 <b>ငွေလွှဲရန် အကောင့်များ (နံပါတ်ကို နှိပ်၍ Copy ကူးနိုင်ပါသည်) -</b>\n` +
+          `${formatTelegramPaymentAccountsHtml(config)}\n\n` +
+          `📸 ငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
       );
       return res.status(200).json({ status: "success" });
     }
@@ -3676,11 +3844,16 @@ export default async function handler(req, res) {
 
     if (text.startsWith("REQ_P_")) {
       const boyId = text.replace("REQ_P_", "");
+      const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
       const config = await getAppConfig();
       await setDoc(stateRef, { step: "WAIT_PRIV_SS", data: { boyId } }, { merge: true });
       await sendMessage(
         chatId,
-        `🔒 Private ပုံများ ကြည့်ရှုခွင့်အတွက် ကျသင့်ငွေမှာ <b>${config.privFee} ကျပ်</b> ဖြစ်ပါသည်။\n\n💳 အောက်ပါအကောင့်သို့ ငွေလွှဲပေးပါ -\n<code>${escapeHTML(config.paymentInfo)}</code>\n\n📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
+        `🔒 <b>${boyCode} ၏ Private ပုံနှင့် Video များ ကြည့်ရှုခွင့်</b>\n\n` +
+          `💰 <b>ကျသင့်ငွေ:</b> <b>${formatBotKyats(config.privFee)} ကျပ်</b>\n\n` +
+          `🏦 <b>ငွေလွှဲရန် အကောင့်များ (နံပါတ်ကို နှိပ်၍ Copy ကူးနိုင်ပါသည်) -</b>\n` +
+          `${formatTelegramPaymentAccountsHtml(config)}\n\n` +
+          `📸 ငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
       );
       return res.status(200).json({ status: "success" });
     }
@@ -3799,21 +3972,151 @@ export default async function handler(req, res) {
       await setDoc(
         stateRef,
         {
-          step: "WAIT_HIRE_SS",
-          data: { ...(currentState.data || {}), boyId, clientType: chosenClientType },
+          step: "HIRE_SELECT_PACKAGE",
+          data: {
+            ...(currentState.data || {}),
+            boyId,
+            clientType: chosenClientType,
+            typeCode,
+          },
         },
         { merge: true }
       );
+
+      // Header message introducing individual Package Menu Cards
       await sendMessage(
         chatId,
         `✅ <b>သင်၏ ဧည့်သည်အမျိုးအစား အတည်ပြုပြီးပါပြီ:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n\n` +
-          `❤️ <b>${boyCode}</b> အား ခေါ်ယူခြင်းအတွက် ဈေးနှုန်းများမှာ အောက်ပါအတိုင်းဖြစ်ပါသည် -\n\n` +
-          `🕒 Section: ${config.feeSec} ကျပ်\n` +
-          `☀️ Day: ${config.feeDay} ကျပ်\n` +
-          `🌙 Night: ${config.feeNight} ကျပ်\n\n` +
-          `💳 Booking တင်ရန်အတွက် စရံငွေ (၅၀%) ကို အောက်ပါအကောင့်သို့ လွှဲပေးပါ -\n` +
-          `<code>${escapeHTML(config.paymentInfo)}</code>\n\n` +
-          `📸 ပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပါ။`
+          `📋 <b>${boyCode} အတွက် ရရှိနိုင်သော Dating Package Menu Card (${config.activePackages.length} ခု)</b> ကို အောက်တွင် တစ်ခုချင်းစီ <b>ဈေးနှုန်း</b>၊ <b>သတ်မှတ်ကြာချိန်</b> နှင့် <b>စရံငွေ (${config.depositPercent}%)</b> အသေးစိတ်ဖြင့် ပြသထားပါသည်။\n\n` +
+          `👇 <i>မိမိခေါ်ယူလိုသော Menu Card အောက်ရှိ <b>ရွေးချယ်မည်</b> ခလုတ်ကို နှိပ်ပါ -</i>`
+      );
+
+      // Send each active package as an individual, self-contained Menu Card with its own selection button
+      for (let idx = 0; idx < config.activePackages.length; idx++) {
+        const pkg = config.activePackages[idx];
+        const priceNum = Math.max(0, Math.round(Number(pkg.price) || 0));
+        const depositAmount = Math.round((priceNum * config.depositPercent) / 100);
+        const badgeHtml = pkg.badge ? `  ★ <i>${escapeHTML(pkg.badge)}</i>` : "";
+        const descHtml = pkg.description
+          ? `\n📝 <b>ဝန်ဆောင်မှု:</b> ${escapeHTML(pkg.description)}`
+          : "";
+
+        const cardText =
+          `╭──────────────────────────╮\n` +
+          `${pkg.icon} <b>MENU CARD 0${idx + 1} · ${escapeHTML(pkg.title.toUpperCase())}</b>${badgeHtml}\n` +
+          `╰──────────────────────────╯\n` +
+          `💎 <b>Package:</b> <b>${escapeHTML(pkg.nameMm || pkg.title)}</b>\n` +
+          `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(pkg.duration)}</b>\n` +
+          `💰 <b>သတ်မှတ်ဈေးနှုန်း:</b> <b>${formatBotKyats(priceNum)} ကျပ်</b>\n` +
+          `💳 <b>ပေးသွင်းရမည့် စရံငွေ (${config.depositPercent}%):</b> <b>${formatBotKyats(depositAmount)} ကျပ်</b>` +
+          descHtml;
+
+        await sendMessage(chatId, cardText, {
+          inline_keyboard: [
+            [
+              {
+                text: `✅ ${pkg.title} ရွေးချယ်မည် (${formatBotKyats(priceNum)} Ks · စရံ ${formatBotKyats(depositAmount)} Ks)`,
+                callback_data: `HPKG_${idx}_${typeCode}_${boyId}`,
+              },
+            ],
+          ],
+        });
+      }
+
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text.startsWith("HPKG_")) {
+      // Format: HPKG_<idxOrId>_<typeCode>_<boyId>
+      const rest = text.replace(/^HPKG_/, "");
+      const firstUnderscore = rest.indexOf("_");
+      const secondUnderscore = rest.indexOf("_", firstUnderscore + 1);
+      if (firstUnderscore > 0 && secondUnderscore > firstUnderscore) {
+        const pkgIdxOrId = rest.slice(0, firstUnderscore);
+        const typeCode = rest.slice(firstUnderscore + 1, secondUnderscore);
+        const boyId = rest.slice(secondUnderscore + 1);
+        const chosenClientType = typeCode === "G" ? "girl" : "lgbt";
+        const clientTypeLabel = formatBookingClientTypeLabel(chosenClientType);
+        const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+
+        const config = await getAppConfig();
+        const idxNum = Number(pkgIdxOrId);
+        const chosenPkg =
+          (Number.isInteger(idxNum) && config.activePackages[idxNum]) ||
+          config.activePackages.find((p) => p.id === pkgIdxOrId) ||
+          config.activePackages[0];
+
+        const priceNum = Math.max(0, Math.round(Number(chosenPkg?.price) || 0));
+        const depositAmount = Math.round((priceNum * config.depositPercent) / 100);
+        const remainingAmount = Math.max(0, priceNum - depositAmount);
+        const packageNameFull = `${chosenPkg.icon} ${chosenPkg.nameMm || chosenPkg.title}`;
+
+        await setDoc(
+          stateRef,
+          {
+            step: "WAIT_HIRE_SS",
+            data: {
+              ...(currentState.data || {}),
+              boyId,
+              clientType: chosenClientType,
+              typeCode,
+              packageId: chosenPkg.id,
+              packageTitle: chosenPkg.title,
+              packageName: packageNameFull,
+              packageDuration: chosenPkg.duration,
+              packagePrice: priceNum,
+              depositPercent: config.depositPercent,
+              depositAmount,
+              remainingAmount,
+            },
+          },
+          { merge: true }
+        );
+
+        await sendMessage(
+          chatId,
+          `🧾 <b>ရွေးချယ်ထားသော Package အတည်ပြုချက် (Booking Summary)</b>\n\n` +
+            `👤 <b>Date Boy:</b> <b>${boyCode}</b>\n` +
+            `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+            `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageNameFull)}</b>\n` +
+            `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(chosenPkg.duration)}</b>\n` +
+            `💰 <b>စုစုပေါင်း ကျသင့်ငွေ:</b> <b>${formatBotKyats(priceNum)} ကျပ်</b>\n` +
+            `💳 <b>ယခုလွှဲရမည့် စရံငွေ (${config.depositPercent}%):</b> <b>${formatBotKyats(depositAmount)} ကျပ်</b>\n` +
+            `💵 <b>တွေ့ဆုံချိန် ကျန်ငွေ:</b> <b>${formatBotKyats(remainingAmount)} ကျပ်</b>\n\n` +
+            `🏦 <b>စရံငွေ လွှဲပေးရမည့် အကောင့်များ (နံပါတ်ကို နှိပ်၍ Copy ကူးနိုင်ပါသည်) -</b>\n` +
+            `${formatTelegramPaymentAccountsHtml(config)}\n\n` +
+            `📸 ငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပေးပါ။`,
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: "🔄 အခြား Package Menu Card ပြန်ရွေးမည်",
+                  callback_data: `HIRFORCE_${typeCode}_${boyId}`,
+                },
+              ],
+            ],
+          }
+        );
+        return res.status(200).json({ status: "success" });
+      }
+    }
+
+    if (currentState.step === "HIRE_SELECT_PACKAGE" && (text || photos.length > 0) && !text.startsWith("/")) {
+      const boyId = currentState.data?.boyId || "";
+      const typeCode = currentState.data?.typeCode || (currentState.data?.clientType === "girl" ? "G" : "L");
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ ငွေလွှဲပြေစာ မပို့မီ အပေါ်တွင် ပြသထားသော <b>Package Menu Card များထဲမှ မိမိခေါ်ယူလိုသော Card အောက်ရှိ [ ✅ ရွေးချယ်မည် ]</b> ခလုတ်ကို အရင်ဆုံး နှိပ်ပေးပါ (သို့မဟုတ် Menu Card များ ပြန်ကြည့်ရန် အောက်ပါခလုတ်ကို နှိပ်ပါ) -",
+        {
+          inline_keyboard: [
+            [
+              {
+                text: "📋 Package Menu Card များ ပြန်ကြည့်မည်",
+                callback_data: `HIRFORCE_${typeCode}_${boyId}`,
+              },
+            ],
+          ],
+        }
       );
       return res.status(200).json({ status: "success" });
     }
@@ -3849,6 +4152,17 @@ export default async function handler(req, res) {
       const clientTypeLabel = formatBookingClientTypeLabel(clientType);
       const clientTypeShort = formatBookingClientTypeShortBadge(clientType);
       const boyCode = `WLDB-${boyId.substring(0, 5).toUpperCase()}`;
+
+      const packageId = String(currentState.data.packageId || "sec");
+      const packageName = String(currentState.data.packageName || "🕒 Section (အချိန်ပိုင်း)");
+      const packageDuration = String(currentState.data.packageDuration || "");
+      const packagePrice = Number(currentState.data.packagePrice || 0);
+      const depositPercent = Number(currentState.data.depositPercent || 50);
+      const depositAmount = Number(currentState.data.depositAmount || 0);
+      const formattedDurationSummary =
+        packagePrice > 0
+          ? `${packageName}${packageDuration ? ` · ${packageDuration}` : ""} — ${formatBotKyats(packagePrice)} Ks (စရံ ${formatBotKyats(depositAmount)} Ks)`
+          : `${packageName} (${depositPercent}% Deposit Paid)`;
 
       const boySnap = boyId ? await getDoc(doc(db, "dateboys", boyId)) : null;
       const boyData = boySnap?.exists() ? boySnap.data() : {};
@@ -3893,8 +4207,14 @@ export default async function handler(req, res) {
           depositFileId: fileIdToForward || "",
           preferredDate: "Telegram Bot မှ ညှိနှိုင်းမည်",
           preferredTime: "Telegram Bot",
-          duration: "50% Deposit Paid (Telegram Bot)",
-          notes: `Telegram Bot မှ စရံပြေစာ ပေးပို့ထားသော Dating Request (${clientTypeLabel})`,
+          packageId,
+          packageName,
+          packageDuration,
+          packagePrice,
+          depositPercent,
+          depositAmount,
+          duration: formattedDurationSummary,
+          notes: `Telegram Bot မှ စရံပြေစာ ပေးပို့ထားသော Dating Request (${clientTypeLabel} · ${packageName})`,
           status: "pending",
           createdAt: serverTimestamp(),
         });
@@ -3908,22 +4228,34 @@ export default async function handler(req, res) {
         chatId,
         `⏳ <b>Booking စရံ ငွေလွှဲပြေစာ ရရှိပါပြီ (${bookingRef})။</b>\n\n` +
           `👤 <b>Date Boy:</b> <b>${boyCode}</b>\n` +
-          `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n\n` +
-          `Admin မှ စစ်ဆေးအတည်ပြုပြီးသည်နှင့် သက်ဆိုင်ရာ Date Boy ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစားနှင့်တကွ ချက်ချင်း အကြောင်းကြားပေးပါမည်။`
+          `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+          `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageName)}</b>\n` +
+          (packageDuration ? `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDuration)}</b>\n` : "") +
+          (packagePrice > 0
+            ? `💰 <b>Package ဈေးနှုန်း:</b> <b>${formatBotKyats(packagePrice)} ကျပ်</b> (စရံ <b>${formatBotKyats(depositAmount)} ကျပ်</b>)\n`
+            : "") +
+          `\nAdmin မှ စစ်ဆေးအတည်ပြုပြီးသည်နှင့် သက်ဆိုင်ရာ Date Boy ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစားနှင့် Package အချက်အလက်များကို ချက်ချင်း အကြောင်းကြားပေးပါမည်။`
       );
       if (adminChatId) {
         const boyLinkLine = boyTgLink
           ? `\n🔗 <b>Date Boy Telegram:</b> <a href="${boyTgLink}">💬 ${escapeHTML(boyName)} နှင့် တိုက်ရိုက်စကားပြောရန်</a>`
           : "";
+        const pkgLines =
+          `\n📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageName)}</b>` +
+          (packageDuration ? `\n⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDuration)}</b>` : "") +
+          (packagePrice > 0
+            ? `\n💰 <b>ဈေးနှုန်း / စရံ (${depositPercent}%):</b> <b>${formatBotKyats(packagePrice)} Ks</b> (စရံ <b>${formatBotKyats(depositAmount)} Ks</b>)`
+            : "");
         const adminMsg =
           `🚨 <b>Dating Request (Booking) — ${bookingRef}</b> 🚨\n\n` +
           `🆔 <b>Date Boy:</b> ${escapeHTML(boyName)} (<b>${boyCode}</b>)\n` +
           `🎯 <b>Date Boy လက်ခံသော ဧည့်သည်:</b> ${escapeHTML(boyPrefLabel)}\n` +
           `📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
-          `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
-          `🧑‍💼 <b>Client:</b> <a href="${clientProfileLink}">💬 ${escapeHTML(clientDisplayName)} (Profile နှိပ်ရန်)</a>` +
+          `👤 <b>ခေါ်ယူသူ ဧည့်သည်အမျိုးအစား (Client Type):</b> <b>${escapeHTML(clientTypeLabel)}</b>` +
+          pkgLines +
+          `\n🧑‍💼 <b>Client:</b> <a href="${clientProfileLink}">💬 ${escapeHTML(clientDisplayName)} (Profile နှိပ်ရန်)</a>` +
           boyLinkLine +
-          `\n\n💳 Client မှ Booking စရံပြေစာ ပို့ထားပါသည်။ Approve နှိပ်လိုက်ပါက Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့်တကွ အလိုအလျောက် အကြောင်းကြားစာ ပို့ပေးပါမည်။`;
+          `\n\n💳 Client မှ Booking စရံပြေစာ ပို့ထားပါသည်။ Approve နှိပ်လိုက်ပါက Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့် ရွေးချယ်ထားသော Package (<b>${escapeHTML(packageName)}</b>) တို့ကို အလိုအလျောက် အကြောင်းကြားစာ ပို့ပေးပါမည်။`;
 
         const approveCallback = bookingDocId
           ? `APP_HBK_${bookingDocId}`

@@ -32,6 +32,9 @@ import {
   formatBookingClientTypeLabel,
   formatBookingClientTypeShortBadge,
   checkClientTypeCompatibility,
+  normalizePricingConfig,
+  calculatePackageDeposit,
+  formatKyats,
 } from '../utils/catalogLogic';
 import {
   buildUnifiedLocationCatalog,
@@ -73,13 +76,15 @@ export default function Home() {
   const [copiedCode, setCopiedCode] = useState(false);
   const [bookingRef, setBookingRef] = useState('');
   const [bookingError, setBookingError] = useState('');
+  const [pricingConfig, setPricingConfig] = useState(() => normalizePricingConfig({}));
+  const [selectedPackageId, setSelectedPackageId] = useState('sec');
   const [bookingForm, setBookingForm] = useState({
     clientType: '',
     clientName: '',
     clientContact: '',
     preferredDate: '',
     preferredTime: '',
-    duration: '2 Hours (Standard Date)',
+    duration: '🕒 Section (အချိန်ပိုင်း) · ၂ နာရီ ~ ၃ နာရီ (1 Session) — 70,000 Ks',
     notes: '',
   });
 
@@ -87,10 +92,11 @@ export default function Home() {
     const fetchData = async () => {
       try {
         const qBoys = query(collection(db, 'dateboys'), where('status', '==', 'approved'));
-        const [boysSnap, locSnap, masterSnap] = await Promise.all([
+        const [boysSnap, locSnap, masterSnap, configSnap] = await Promise.all([
           getDocs(qBoys),
           getDocs(collection(db, 'locations')),
           getDoc(doc(db, 'settings', 'myanmar_locations')),
+          getDoc(doc(db, 'settings', 'app_config')),
         ]);
 
         const rawBoys = boysSnap.docs.map((docItem) => ({ id: docItem.id, ...docItem.data() }));
@@ -108,6 +114,18 @@ export default function Home() {
 
         if (masterSnap.exists() && Array.isArray(masterSnap.data()?.regions)) {
           setMasterRegions(masterSnap.data().regions);
+        }
+        if (configSnap.exists()) {
+          const normPricing = normalizePricingConfig(configSnap.data());
+          setPricingConfig(normPricing);
+          const firstPkg = normPricing.activePackages[0];
+          if (firstPkg) {
+            setSelectedPackageId(firstPkg.id);
+            setBookingForm((prev) => ({
+              ...prev,
+              duration: `${firstPkg.icon} ${firstPkg.nameMm} · ${firstPkg.duration} — ${formatKyats(firstPkg.price)} Ks`,
+            }));
+          }
         }
         setLocations(locSnap.docs.map((docItem) => docItem.data()));
       } catch (error) {
@@ -235,9 +253,19 @@ export default function Home() {
     setSubmittingBooking(true);
 
     const generatedRef = `WL-${Math.random().toString(36).substring(2, 7).toUpperCase()}`;
+    const chosenPkg =
+      pricingConfig.activePackages.find((p) => p.id === selectedPackageId) ||
+      pricingConfig.activePackages[0];
+    const dep = calculatePackageDeposit(
+      chosenPkg?.price || 0,
+      pricingConfig.depositPercent
+    );
+    const formattedDuration = chosenPkg
+      ? `${chosenPkg.icon} ${chosenPkg.nameMm} · ${chosenPkg.duration} — ${formatKyats(chosenPkg.price)} Ks`
+      : bookingForm.duration;
 
     try {
-      const bookingDocRef = await addDoc(collection(db, 'bookings'), {
+      const bookingPayload = {
         bookingRef: generatedRef,
         source: 'website',
         dateBoyId: selectedBoy.id,
@@ -247,7 +275,18 @@ export default function Home() {
         dateBoyTownship: selectedBoy.township || '',
         dateBoyPreference: selectedBoy.clientPreference || 'both',
         ...bookingForm,
+        duration: formattedDuration,
+        packageId: chosenPkg?.id || 'sec',
+        packageName: chosenPkg ? `${chosenPkg.icon} ${chosenPkg.nameMm}` : bookingForm.duration,
+        packageDuration: chosenPkg?.duration || '',
+        packagePrice: chosenPkg?.price || 0,
+        depositPercent: dep.depositPercent,
+        depositAmount: dep.depositAmount,
         clientType: compat.normalizedClientType,
+      };
+
+      const bookingDocRef = await addDoc(collection(db, 'bookings'), {
+        ...bookingPayload,
         status: 'pending',
         createdAt: serverTimestamp(),
       });
@@ -258,15 +297,7 @@ export default function Home() {
         body: JSON.stringify({
           internal_action: 'web_new_booking',
           bookingId: bookingDocRef.id,
-          bookingRef: generatedRef,
-          dateBoyId: selectedBoy.id,
-          dateBoyCode: selectedBoy.boyCode,
-          dateBoyName: selectedBoy.name || '',
-          dateBoyCity: selectedBoy.city || '',
-          dateBoyTownship: selectedBoy.township || '',
-          dateBoyPreference: selectedBoy.clientPreference || 'both',
-          ...bookingForm,
-          clientType: compat.normalizedClientType,
+          ...bookingPayload,
         }),
       }).catch((e) => console.error('Admin booking notification error:', e));
     } catch (err) {
@@ -1201,34 +1232,82 @@ export default function Home() {
                     </div>
                   </div>
 
-                  <div>
-                    <label
-                      htmlFor="booking-duration"
-                      className="block text-xs font-semibold text-slate-800 mb-1.5"
-                    >
-                      Arrangement Package / Duration
-                    </label>
-                    <select
-                      id="booking-duration"
-                      value={bookingForm.duration}
-                      onChange={(e) =>
-                        setBookingForm({ ...bookingForm, duration: e.target.value })
-                      }
-                      className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-200 focus:border-amber-500 focus:bg-white outline-none text-sm font-medium cursor-pointer"
-                    >
-                      <option value="2 Hours (Standard Date)">
-                        2 Hours — Standard Private Dinner / Lounge Date
-                      </option>
-                      <option value="4 Hours (Half-Day Companion)">
-                        4 Hours — Half-Day Social & Event Arrangement
-                      </option>
-                      <option value="Full Day / Evening Event">
-                        Full Evening / Overnight VIP Arrangement
-                      </option>
-                      <option value="Custom Arrangement">
-                        Bespoke Itinerary (Coordinate with Concierge)
-                      </option>
-                    </select>
+                  <div className="space-y-2.5">
+                    <div className="flex items-center justify-between">
+                      <label className="block text-xs font-semibold text-slate-800">
+                        ရွေးချယ်လိုသော Package Menu Card (ဈေးနှုန်းနှင့် သတ်မှတ်ကြာချိန်) *
+                      </label>
+                      <span className="font-mono text-[11px] text-amber-700 font-semibold tabular-nums">
+                        စရံငွေ ({pricingConfig.depositPercent}%)
+                      </span>
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2.5">
+                      {pricingConfig.activePackages.map((pkg) => {
+                        const isPkgSelected = selectedPackageId === pkg.id;
+                        const dep = calculatePackageDeposit(
+                          pkg.price,
+                          pricingConfig.depositPercent
+                        );
+                        return (
+                          <button
+                            key={pkg.id}
+                            type="button"
+                            onClick={() => {
+                              setSelectedPackageId(pkg.id);
+                              setBookingForm({
+                                ...bookingForm,
+                                duration: `${pkg.icon} ${pkg.nameMm} · ${pkg.duration} — ${formatKyats(pkg.price)} Ks`,
+                              });
+                            }}
+                            className={`text-left p-3.5 rounded-xl border transition-all cursor-pointer flex flex-col justify-between ${
+                              isPkgSelected
+                                ? 'bg-slate-900 text-white border-amber-500 shadow-sm'
+                                : 'bg-slate-50 hover:bg-slate-100 text-slate-900 border-slate-200'
+                            }`}
+                          >
+                            <div>
+                              <div className="flex items-center justify-between gap-1 mb-1">
+                                <span className="text-xs font-bold">
+                                  {pkg.icon} {pkg.title}
+                                </span>
+                                {pkg.badge && (
+                                  <span
+                                    className={`font-mono text-[10px] font-semibold ${
+                                      isPkgSelected ? 'text-amber-300' : 'text-amber-700'
+                                    }`}
+                                  >
+                                    ★ {pkg.badge}
+                                  </span>
+                                )}
+                              </div>
+                              <p
+                                className={`text-[11px] font-medium leading-snug ${
+                                  isPkgSelected ? 'text-amber-200' : 'text-slate-600'
+                                }`}
+                              >
+                                ⏱️ {pkg.duration}
+                              </p>
+                            </div>
+                            <div className="mt-2.5 pt-2 border-t border-slate-200/20 font-mono tabular-nums">
+                              <span
+                                className={`text-sm font-bold block ${
+                                  isPkgSelected ? 'text-white' : 'text-slate-900'
+                                }`}
+                              >
+                                {formatKyats(pkg.price)} Ks
+                              </span>
+                              <span
+                                className={`text-[10px] block ${
+                                  isPkgSelected ? 'text-emerald-300' : 'text-emerald-700'
+                                }`}
+                              >
+                                စရံ ({dep.depositPercent}%): {formatKyats(dep.depositAmount)} Ks
+                              </span>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
 
                   <div>

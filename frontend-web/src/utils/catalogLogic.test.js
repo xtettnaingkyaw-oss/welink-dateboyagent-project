@@ -25,6 +25,12 @@ import {
   formatBookingClientTypeLabel,
   formatBookingClientTypeShortBadge,
   checkClientTypeCompatibility,
+  formatKyats,
+  calculatePackageDeposit,
+  parseLegacyPaymentInfo,
+  formatPaymentAccountsToInfoString,
+  normalizePricingConfig,
+  serializePricingConfigForFirestore,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -518,6 +524,76 @@ test('Dating Request Client Type (Girl / LGBT) normalization, Date Boy compatibi
   });
   assert.match(summaryWithClientType, /Client Type: 👩 Girl \(အမျိုးသမီး ဧည့်သည်\)/);
 });
+
+test('Pricing Config, Package Menu Cards (Duration, Price, Deposit), and Payment Accounts normalize and serialize cleanly', () => {
+  // 1. Legacy Firestore settings normalize into 3 rich Menu Cards (Section, Day, Night) with durations
+  const normalizedFromLegacy = normalizePricingConfig({
+    feeSec: 80000,
+    feeDay: 320000,
+    feeNight: 350000,
+    clientIdFee: 15000,
+    privFee: 12000,
+    paymentInfo: 'KPay: 09123456789 (U Kyaw) | WavePay: 09987654321 (Daw Mya)',
+  });
+
+  assert.equal(normalizedFromLegacy.depositPercent, 50);
+  assert.equal(normalizedFromLegacy.clientIdFee, 15000);
+  assert.equal(normalizedFromLegacy.privFee, 12000);
+  assert.equal(normalizedFromLegacy.datingPackages.length, 3);
+  assert.equal(normalizedFromLegacy.datingPackages[0].id, 'sec');
+  assert.equal(normalizedFromLegacy.datingPackages[0].price, 80000);
+  assert.ok(normalizedFromLegacy.datingPackages[0].duration.length > 0);
+  assert.equal(normalizedFromLegacy.datingPackages[1].price, 320000);
+  assert.equal(normalizedFromLegacy.datingPackages[2].price, 350000);
+
+  // 2. Payment accounts parsed from legacy string and formatted back
+  assert.equal(normalizedFromLegacy.paymentAccounts.length, 2);
+  assert.equal(normalizedFromLegacy.paymentAccounts[0].accountNumber, '09123456789');
+  assert.equal(normalizedFromLegacy.paymentAccounts[0].accountName, 'U Kyaw');
+  assert.equal(normalizedFromLegacy.paymentAccounts[1].accountNumber, '09987654321');
+  assert.match(formatPaymentAccountsToInfoString(normalizedFromLegacy.paymentAccounts), /09123456789/);
+
+  // 3. Deposit calculation and Kyats formatting
+  assert.equal(calculatePackageDeposit(70000, 50).depositAmount, 35000);
+  assert.equal(calculatePackageDeposit(70000, 50).remainingAmount, 35000);
+  assert.equal(calculatePackageDeposit(300000, 30).depositAmount, 90000);
+  assert.equal(calculatePackageDeposit(300000, 30).remainingAmount, 210000);
+  assert.equal(formatKyats(300000), '300,000');
+
+  // 4. Custom Menu Card addition + Firestore serialization keeps legacy fields in sync
+  const customConfig = {
+    ...normalizedFromLegacy,
+    depositPercent: 30,
+    datingPackages: [
+      ...normalizedFromLegacy.datingPackages,
+      {
+        id: 'vip_weekend',
+        icon: '💎',
+        title: 'VIP Weekend Getaway',
+        nameMm: 'ပိတ်ရက် အထူးခရီးစဉ် Package',
+        duration: '၂၄ နာရီ (Full Day & Night)',
+        price: 600000,
+        description: 'VIP ခရီးစဉ် အဖော်လိုက်ပေးခြင်း',
+        badge: 'VIP Special',
+        enabled: true,
+      },
+    ],
+  };
+
+  const payload = serializePricingConfigForFirestore(customConfig);
+  assert.equal(payload.feeSec, 80000);
+  assert.equal(payload.feeDay, 320000);
+  assert.equal(payload.feeNight, 350000);
+  assert.equal(payload.depositPercent, 30);
+  assert.equal(payload.datingPackages.length, 4);
+  assert.equal(payload.datingPackages[3].duration, '၂၄ နာရီ (Full Day & Night)');
+
+  // 5. parseLegacyPaymentInfo handles empty input gracefully with default account
+  const fallbackAccounts = parseLegacyPaymentInfo('');
+  assert.equal(fallbackAccounts.length, 1);
+  assert.equal(fallbackAccounts[0].accountNumber, '09123456789');
+});
+
 
 
 
