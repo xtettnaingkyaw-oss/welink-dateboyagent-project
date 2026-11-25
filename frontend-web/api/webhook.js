@@ -785,6 +785,320 @@ function isClientTypeCompatibleWithBoy(clientType, boyClientPreference) {
   return true;
 }
 
+const BURMESE_WEEKDAYS = [
+  "တနင်္ဂနွေနေ့",
+  "တနင်္လာနေ့",
+  "အင်္ဂါနေ့",
+  "ဗုဒ္ဓဟူးနေ့",
+  "ကြာသပတေးနေ့",
+  "သောကြာနေ့",
+  "စနေနေ့",
+];
+
+const BURMESE_MONTHS = [
+  "January (ဇန်နဝါရီ)",
+  "February (ဖေဖော်ဝါရီ)",
+  "March (မတ်)",
+  "April (ဧပြီ)",
+  "May (မေ)",
+  "June (ဇွန်)",
+  "July (ဇူလိုင်)",
+  "August (ဩဂုတ်)",
+  "September (စက်တင်ဘာ)",
+  "October (အောက်တိုဘာ)",
+  "November (နိုဝင်ဘာ)",
+  "December (ဒီဇင်ဘာ)",
+];
+
+function getMyanmarTodayParts(nowMs = Date.now()) {
+  const MMT_OFFSET_MS = (6 * 60 + 30) * 60 * 1000;
+  const mmtNow = new Date(nowMs + MMT_OFFSET_MS);
+  const year = mmtNow.getUTCFullYear();
+  const month = mmtNow.getUTCMonth() + 1;
+  const day = mmtNow.getUTCDate();
+
+  const toIsoKey = (y, m, d) => {
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(dt.getUTCDate()).padStart(2, "0");
+    return `${yy}-${mm}-${dd}`;
+  };
+
+  return {
+    year,
+    month,
+    day,
+    yearMonth: `${year}-${String(month).padStart(2, "0")}`,
+    todayKey: toIsoKey(year, month, day),
+    tomorrowKey: toIsoKey(year, month, day + 1),
+    dayAfterTomorrowKey: toIsoKey(year, month, day + 2),
+  };
+}
+
+function formatBurmeseBookingDateLabel(rawDate = "", nowMs = Date.now()) {
+  const trimmed = String(rawDate || "").trim();
+  if (!trimmed) return "";
+
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  const isoMatch = trimmed.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+
+  if (isoMatch) {
+    year = Number(isoMatch[1]);
+    month = Number(isoMatch[2]);
+    day = Number(isoMatch[3]);
+  } else if (dmyMatch) {
+    day = Number(dmyMatch[1]);
+    month = Number(dmyMatch[2]);
+    year = Number(dmyMatch[3]);
+  }
+
+  if (year >= 2024 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+    const dt = new Date(Date.UTC(year, month - 1, day));
+    if (
+      dt.getUTCFullYear() === year &&
+      dt.getUTCMonth() === month - 1 &&
+      dt.getUTCDate() === day
+    ) {
+      const isoKey = `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+      const weekdayMm = BURMESE_WEEKDAYS[dt.getUTCDay()] || "";
+      const { todayKey, tomorrowKey, dayAfterTomorrowKey } = getMyanmarTodayParts(nowMs);
+      let relativeSuffix = "";
+      if (isoKey === todayKey) relativeSuffix = " · ယနေ့ (Today)";
+      else if (isoKey === tomorrowKey) relativeSuffix = " · မနက်ဖြန် (Tomorrow)";
+      else if (isoKey === dayAfterTomorrowKey) relativeSuffix = " · သန်ဘက်ခါ";
+      return `${isoKey} (${weekdayMm}${relativeSuffix})`;
+    }
+  }
+
+  return trimmed;
+}
+
+function formatBurmeseBookingTimeLabel(rawTime = "") {
+  const trimmed = String(rawTime || "").trim();
+  if (!trimmed) return "";
+  if (/ASAP|အမြန်ဆုံး|ချက်ချင်း/i.test(trimmed)) {
+    return "⚡ အမြန်ဆုံး / ချက်ချင်း (ASAP)";
+  }
+
+  const amPmMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (amPmMatch) {
+    const hr12 = Number(amPmMatch[1]);
+    const min = amPmMatch[2];
+    const period = amPmMatch[3].toUpperCase();
+    const hr24 = period === "PM" ? (hr12 === 12 ? 12 : hr12 + 12) : hr12 === 12 ? 0 : hr12;
+    const padded12 = `${String(hr12).padStart(2, "0")}:${min} ${period}`;
+
+    let periodMm = "ညပိုင်း";
+    if (hr24 >= 5 && hr24 < 12) periodMm = "နံနက်ပိုင်း";
+    else if (hr24 >= 12 && hr24 < 16) periodMm = "နေ့လယ်ပိုင်း";
+    else if (hr24 >= 16 && hr24 < 19) periodMm = "ညနေပိုင်း";
+
+    return `${padded12} (${periodMm})`;
+  }
+
+  const h24Match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24Match) {
+    const hr24 = Number(h24Match[1]);
+    const min = h24Match[2];
+    if (hr24 >= 0 && hr24 <= 23) {
+      const period = hr24 >= 12 ? "PM" : "AM";
+      const hr12 = hr24 % 12 || 12;
+      return formatBurmeseBookingTimeLabel(`${String(hr12).padStart(2, "0")}:${min} ${period}`);
+    }
+  }
+
+  return trimmed;
+}
+
+function buildTelegramDatePickerKeyboard(
+  targetYearMonth = "",
+  nowMs = Date.now(),
+  backCallbackData = ""
+) {
+  const { year: curYear, month: curMonth, todayKey, tomorrowKey, dayAfterTomorrowKey } =
+    getMyanmarTodayParts(nowMs);
+
+  let viewYear = curYear;
+  let viewMonth = curMonth;
+  const ymMatch = String(targetYearMonth || "").match(/^(\d{4})-(\d{1,2})$/);
+  if (ymMatch) {
+    const y = Number(ymMatch[1]);
+    const m = Number(ymMatch[2]);
+    if (y >= 2024 && y <= 2035 && m >= 1 && m <= 12) {
+      viewYear = y;
+      viewMonth = m;
+    }
+  }
+
+  const prevDate = new Date(Date.UTC(viewYear, viewMonth - 2, 1));
+  const nextDate = new Date(Date.UTC(viewYear, viewMonth, 1));
+  const prevYm = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  const nextYm = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, "0")}`;
+  const canGoPrev =
+    viewYear > curYear || (viewYear === curYear && viewMonth > curMonth);
+
+  const monthTitle = `${BURMESE_MONTHS[viewMonth - 1]} ${viewYear}`;
+  const firstDayOfWeek = new Date(Date.UTC(viewYear, viewMonth - 1, 1)).getUTCDay();
+  const daysInMonth = new Date(Date.UTC(viewYear, viewMonth, 0)).getUTCDate();
+
+  const rows = [];
+
+  rows.push([
+    {
+      text: `📌 ယနေ့ (${todayKey})`,
+      callback_data: `HDATE_S_${todayKey}`,
+    },
+    {
+      text: `🌤️ မနက်ဖြန် (${tomorrowKey})`,
+      callback_data: `HDATE_S_${tomorrowKey}`,
+    },
+  ]);
+  rows.push([
+    {
+      text: `📅 သန်ဘက်ခါ (${dayAfterTomorrowKey})`,
+      callback_data: `HDATE_S_${dayAfterTomorrowKey}`,
+    },
+  ]);
+
+  rows.push([
+    {
+      text: canGoPrev ? "◀️ ယခင်လ" : "·",
+      callback_data: canGoPrev ? `HDATE_M_${prevYm}` : "HDATE_NOP",
+    },
+    {
+      text: `🗓️ ${monthTitle}`,
+      callback_data: "HDATE_NOP",
+    },
+    {
+      text: "နောက်လ ▶️",
+      callback_data: `HDATE_M_${nextYm}`,
+    },
+  ]);
+
+  rows.push(
+    ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"].map((wd) => ({
+      text: wd,
+      callback_data: "HDATE_NOP",
+    }))
+  );
+
+  let currentWeek = [];
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    currentWeek.push({ text: " ", callback_data: "HDATE_NOP" });
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isoDate = `${viewYear}-${String(viewMonth).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
+    if (isoDate < todayKey) {
+      currentWeek.push({
+        text: "·",
+        callback_data: "HDATE_PAST",
+      });
+    } else if (isoDate === todayKey) {
+      currentWeek.push({
+        text: `[${d}]`,
+        callback_data: `HDATE_S_${isoDate}`,
+      });
+    } else {
+      currentWeek.push({
+        text: String(d),
+        callback_data: `HDATE_S_${isoDate}`,
+      });
+    }
+
+    if (currentWeek.length === 7) {
+      rows.push(currentWeek);
+      currentWeek = [];
+    }
+  }
+
+  if (currentWeek.length > 0) {
+    while (currentWeek.length < 7) {
+      currentWeek.push({ text: " ", callback_data: "HDATE_NOP" });
+    }
+    rows.push(currentWeek);
+  }
+
+  rows.push([
+    {
+      text: "✍️ အခြားရက်စွဲ ကိုယ်တိုင်ရိုက်ထည့်မည်",
+      callback_data: "HDATE_CUSTOM",
+    },
+  ]);
+
+  if (backCallbackData) {
+    rows.push([
+      {
+        text: "⬅️ Package Menu Card ပြန်ရွေးမည်",
+        callback_data: backCallbackData,
+      },
+    ]);
+  }
+
+  return {
+    year: viewYear,
+    month: viewMonth,
+    monthTitle,
+    todayKey,
+    tomorrowKey,
+    inline_keyboard: rows,
+  };
+}
+
+function buildTelegramTimePickerKeyboard() {
+  return {
+    inline_keyboard: [
+      [
+        { text: "🌅 09:00 AM", callback_data: "HTIME_S_09:00 AM" },
+        { text: "🌅 10:00 AM", callback_data: "HTIME_S_10:00 AM" },
+        { text: "🌅 11:00 AM", callback_data: "HTIME_S_11:00 AM" },
+      ],
+      [
+        { text: "☀️ 12:00 PM", callback_data: "HTIME_S_12:00 PM" },
+        { text: "☀️ 01:00 PM", callback_data: "HTIME_S_01:00 PM" },
+        { text: "☀️ 02:00 PM", callback_data: "HTIME_S_02:00 PM" },
+      ],
+      [
+        { text: "🌤️ 03:00 PM", callback_data: "HTIME_S_03:00 PM" },
+        { text: "🌤️ 04:00 PM", callback_data: "HTIME_S_04:00 PM" },
+        { text: "🌤️ 05:00 PM", callback_data: "HTIME_S_05:00 PM" },
+      ],
+      [
+        { text: "🌆 06:00 PM", callback_data: "HTIME_S_06:00 PM" },
+        { text: "🌆 07:00 PM", callback_data: "HTIME_S_07:00 PM" },
+        { text: "🌙 08:00 PM", callback_data: "HTIME_S_08:00 PM" },
+      ],
+      [
+        { text: "🌙 09:00 PM", callback_data: "HTIME_S_09:00 PM" },
+        { text: "🌙 10:00 PM", callback_data: "HTIME_S_10:00 PM" },
+        { text: "🌙 11:00 PM", callback_data: "HTIME_S_11:00 PM" },
+      ],
+      [
+        {
+          text: "⚡ အမြန်ဆုံး / ချက်ချင်း (ASAP)",
+          callback_data: "HTIME_S_ASAP",
+        },
+      ],
+      [
+        {
+          text: "✍️ အခြားအချိန် စာရိုက်ထည့်မည် (ဥပမာ - 7:30 PM)",
+          callback_data: "HTIME_CUSTOM",
+        },
+      ],
+      [
+        {
+          text: "⬅️ ခေါ်ယူမည့် နေ့ရက် (Date) ပြန်ရွေးမည်",
+          callback_data: "HDATE_OPEN",
+        },
+      ],
+    ],
+  };
+}
+
 /**
  * Handles approving or rejecting a Dating Request (Booking) from either Telegram Bot or Web Admin Panel,
  * notifying:
@@ -911,7 +1225,7 @@ async function approveOrRejectDatingBooking({
         durationLineHtml +
         priceLineHtml +
         `\n📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n` +
-        `📅 <b>ရက်စွဲ / အချိန်:</b> ${escapeHTML(scheduleInfo)}\n` +
+        `📅 <b>ခေါ်ယူမည့် နေ့ရက် / အချိန်:</b> <b>${escapeHTML(scheduleInfo)}</b>\n` +
         `📝 <b>မှတ်ချက်:</b> ${escapeHTML(notesInfo)}\n\n` +
         `📞 <i>တွေ့ဆုံရမည့် နေရာနှင့် အချိန်အသေးစိတ်ကို WE LINK Admin မှ တိုက်ရိုက်ဆက်သွယ် ချိတ်ဆက်ပေးပါမည်။ အဆင်သင့်ပြင်ဆင်ထားပေးပါ ခင်ဗျာ။</i>`;
 
@@ -928,8 +1242,9 @@ async function approveOrRejectDatingBooking({
         `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageTitleInfo)}</b>` +
         durationLineHtml +
         priceLineHtml +
+        `\n📅 <b>ခေါ်ယူမည့် နေ့ရက် / အချိန်:</b> <b>${escapeHTML(scheduleInfo)}</b>` +
         `\n📍 <b>မြို့နယ်:</b> ${escapeHTML(boyTownship)}, ${escapeHTML(boyCity)}\n\n` +
-        `✅ သက်ဆိုင်ရာ Date Boy (<b>${escapeHTML(boyCode)}</b>) ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့် Package အချက်အလက်များကို အကြောင်းကြားပြီး ဖြစ်ပါသည်။ Admin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`;
+        `✅ သက်ဆိုင်ရာ Date Boy (<b>${escapeHTML(boyCode)}</b>) ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>)၊ Package နှင့် ခေါ်ယူမည့် နေ့ရက်/အချိန် အချက်အလက်များကို အကြောင်းကြားပြီး ဖြစ်ပါသည်။ Admin မှ အသေးစိတ် ဆက်သွယ်ပေးပါမည်။`;
       const clientSendRes = await sendMessage(
         resolvedClientChatId,
         clientApproveMsg,
@@ -4054,7 +4369,7 @@ export default async function handler(req, res) {
         await setDoc(
           stateRef,
           {
-            step: "WAIT_HIRE_SS",
+            step: "HIRE_SELECT_DATE",
             data: {
               ...(currentState.data || {}),
               boyId,
@@ -4073,32 +4388,296 @@ export default async function handler(req, res) {
           { merge: true }
         );
 
+        const datePicker = buildTelegramDatePickerKeyboard(
+          "",
+          Date.now(),
+          `HIRFORCE_${typeCode}_${boyId}`
+        );
+
         await sendMessage(
           chatId,
-          `🧾 <b>ရွေးချယ်ထားသော Package အတည်ပြုချက် (Booking Summary)</b>\n\n` +
+          `✅ <b>ရွေးချယ်ထားသော Package Menu Card အတည်ပြုပြီးပါပြီ</b>\n\n` +
             `👤 <b>Date Boy:</b> <b>${boyCode}</b>\n` +
-            `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
-            `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageNameFull)}</b>\n` +
+            `🧑‍💼 <b>ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+            `📦 <b>Package:</b> <b>${escapeHTML(packageNameFull)}</b>\n` +
             `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(chosenPkg.duration)}</b>\n` +
-            `💰 <b>စုစုပေါင်း ကျသင့်ငွေ:</b> <b>${formatBotKyats(priceNum)} ကျပ်</b>\n` +
-            `💳 <b>ယခုလွှဲရမည့် စရံငွေ (${config.depositPercent}%):</b> <b>${formatBotKyats(depositAmount)} ကျပ်</b>\n` +
-            `💵 <b>တွေ့ဆုံချိန် ကျန်ငွေ:</b> <b>${formatBotKyats(remainingAmount)} ကျပ်</b>\n\n` +
-            `🏦 <b>စရံငွေ လွှဲပေးရမည့် အကောင့်များ (နံပါတ်ကို နှိပ်၍ Copy ကူးနိုင်ပါသည်) -</b>\n` +
-            `${formatTelegramPaymentAccountsHtml(config)}\n\n` +
-            `📸 ငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပေးပါ။`,
-          {
-            inline_keyboard: [
-              [
-                {
-                  text: "🔄 အခြား Package Menu Card ပြန်ရွေးမည်",
-                  callback_data: `HIRFORCE_${typeCode}_${boyId}`,
-                },
-              ],
-            ],
-          }
+            `💰 <b>ဈေးနှုန်း:</b> <b>${formatBotKyats(priceNum)} ကျပ်</b> (စရံ ${config.depositPercent}%: <b>${formatBotKyats(depositAmount)} ကျပ်</b>)\n\n` +
+            `📅 <b>အဆင့် (၃) — ခေါ်ယူလိုသည့် နေ့ရက် (Preferred Date) ကို ရွေးချယ်ပေးပါ -</b>\n` +
+            `<i>(အောက်ပါ Calendar Date Picker မှ ယနေ့၊ မနက်ဖြန် သို့မဟုတ် မိမိခေါ်ယူလိုသော ရက်စွဲခလုတ်ကို နှိပ်၍ ရွေးချယ်ပါ)</i>`,
+          { inline_keyboard: datePicker.inline_keyboard }
         );
         return res.status(200).json({ status: "success" });
       }
+    }
+
+    // ==========================================
+    // 📅 Interactive Telegram Date Picker & Time Picker Handlers
+    // ==========================================
+    if (text === "HDATE_NOP") {
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text === "HDATE_PAST") {
+      await sendMessage(
+        chatId,
+        "⚠️ ပြီးခဲ့သော ရက်စွဲများကို ရွေးချယ်၍ မရပါ။ ကျေးဇူးပြု၍ <b>ယနေ့</b> သို့မဟုတ် <b>လာမည့်ရက်စွဲတစ်ခု</b>ကို Calendar ပေါ်မှ နှိပ်၍ ရွေးချယ်ပေးပါ။"
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text === "HDATE_OPEN" || text.startsWith("HDATE_M_")) {
+      const targetYm = text.startsWith("HDATE_M_") ? text.replace("HDATE_M_", "") : "";
+      const stData = currentState.data || {};
+      const boyId = stData.boyId || "";
+      const typeCode = stData.typeCode || (stData.clientType === "girl" ? "G" : "L");
+      const boyCode = boyId ? `WLDB-${boyId.substring(0, 5).toUpperCase()}` : "WLDB";
+      const packageNameFull = stData.packageName || "🕒 Section (အချိန်ပိုင်း)";
+      const packageDuration = stData.packageDuration || "";
+
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_DATE",
+          data: { ...stData, calendarYm: targetYm },
+        },
+        { merge: true }
+      );
+
+      const datePicker = buildTelegramDatePickerKeyboard(
+        targetYm,
+        Date.now(),
+        boyId ? `HIRFORCE_${typeCode}_${boyId}` : ""
+      );
+
+      await editOrSendMessage(
+        chatId,
+        callbackMessageId,
+        `📅 <b>ခေါ်ယူလိုသည့် နေ့ရက် (Preferred Date) ရွေးချယ်ရန် — ${boyCode}</b>\n` +
+          `📦 <b>Package:</b> <b>${escapeHTML(packageNameFull)}</b>${packageDuration ? ` (${escapeHTML(packageDuration)})` : ""}\n\n` +
+          `👇 <i>အောက်ပါ Calendar Date Picker (${escapeHTML(datePicker.monthTitle)}) မှ မိမိခေါ်ယူလိုသော နေ့ရက်ကို နှိပ်၍ ရွေးချယ်ပါ -</i>`,
+        { inline_keyboard: datePicker.inline_keyboard }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text === "HDATE_CUSTOM") {
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_CUSTOM_DATE",
+          data: { ...(currentState.data || {}) },
+        },
+        { merge: true }
+      );
+      await sendMessage(
+        chatId,
+        "✍️ ကျေးဇူးပြု၍ <b>ခေါ်ယူလိုသည့် နေ့ရက်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - <code>2026-12-05</code> သို့မဟုတ် <code>5/12/2026</code>) -",
+        {
+          inline_keyboard: [
+            [{ text: "🗓️ Calendar Date Picker ဖြင့် ပြန်ရွေးမည်", callback_data: "HDATE_OPEN" }],
+          ],
+        }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (
+      text.startsWith("HDATE_S_") ||
+      ((currentState.step === "HIRE_SELECT_DATE" ||
+        currentState.step === "HIRE_SELECT_CUSTOM_DATE") &&
+        text &&
+        !text.startsWith("/") &&
+        !text.startsWith("HTIME_") &&
+        !text.startsWith("HIR"))
+    ) {
+      const rawChosenDate = text.startsWith("HDATE_S_")
+        ? text.replace("HDATE_S_", "").trim()
+        : text.trim();
+      const formattedDate = formatBurmeseBookingDateLabel(rawChosenDate, Date.now());
+      const stData = currentState.data || {};
+      const boyId = stData.boyId || "";
+      const boyCode = boyId ? `WLDB-${boyId.substring(0, 5).toUpperCase()}` : "WLDB";
+      const packageNameFull = stData.packageName || "🕒 Section (အချိန်ပိုင်း)";
+      const packageDuration = stData.packageDuration || "";
+
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_TIME",
+          data: {
+            ...stData,
+            preferredDateRaw: rawChosenDate,
+            preferredDate: formattedDate,
+          },
+        },
+        { merge: true }
+      );
+
+      const timePicker = buildTelegramTimePickerKeyboard();
+      const timePromptText =
+        `✅ <b>ခေါ်ယူလိုသည့် နေ့ရက် အတည်ပြုပြီးပါပြီ:</b> <b>${escapeHTML(formattedDate)}</b>\n` +
+        `👤 <b>Date Boy:</b> <b>${boyCode}</b> | 📦 <b>${escapeHTML(packageNameFull)}</b>${packageDuration ? ` (${escapeHTML(packageDuration)})` : ""}\n\n` +
+        `⏰ <b>အဆင့် (၄) — ခေါ်ယူလိုသည့် အချိန် (Preferred Time) ကို ရွေးချယ်ပေးပါ -</b>\n` +
+        `<i>(အောက်ပါ Time Picker မှ နံနက်ပိုင်း၊ နေ့လယ်ပိုင်း၊ ညနေ/ညပိုင်း အချိန်ခလုတ်တစ်ခုကို နှိပ်၍ ရွေးချယ်ပါ)</i>`;
+
+      if (text.startsWith("HDATE_S_") && callbackMessageId) {
+        await editOrSendMessage(chatId, callbackMessageId, timePromptText, timePicker);
+      } else {
+        await sendMessage(chatId, timePromptText, timePicker);
+      }
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text === "HTIME_OPEN") {
+      const stData = currentState.data || {};
+      const formattedDate = stData.preferredDate || "ရွေးချယ်ထားသော နေ့ရက်";
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_TIME",
+          data: stData,
+        },
+        { merge: true }
+      );
+      await editOrSendMessage(
+        chatId,
+        callbackMessageId,
+        `📅 <b>ခေါ်ယူမည့် နေ့ရက်:</b> <b>${escapeHTML(formattedDate)}</b>\n\n` +
+          `⏰ <b>ခေါ်ယူလိုသည့် အချိန် (Preferred Time) ကို ရွေးချယ်ပေးပါ -</b>`,
+        buildTelegramTimePickerKeyboard()
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (text === "HTIME_CUSTOM") {
+      await setDoc(
+        stateRef,
+        {
+          step: "HIRE_SELECT_CUSTOM_TIME",
+          data: { ...(currentState.data || {}) },
+        },
+        { merge: true }
+      );
+      await sendMessage(
+        chatId,
+        "✍️ ကျေးဇူးပြု၍ <b>ခေါ်ယူလိုသည့် အချိန်</b> ကို ရိုက်ထည့်ပေးပါ (ဥပမာ - <code>7:30 PM</code> သို့မဟုတ် <code>ည ၈ နာရီခွဲ</code>) -",
+        {
+          inline_keyboard: [
+            [{ text: "⏰ Time Picker ဖြင့် ပြန်ရွေးမည်", callback_data: "HTIME_OPEN" }],
+          ],
+        }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (
+      text.startsWith("HTIME_S_") ||
+      ((currentState.step === "HIRE_SELECT_TIME" ||
+        currentState.step === "HIRE_SELECT_CUSTOM_TIME") &&
+        text &&
+        !text.startsWith("/") &&
+        !text.startsWith("HDATE_") &&
+        !text.startsWith("HIR"))
+    ) {
+      const rawChosenTime = text.startsWith("HTIME_S_")
+        ? text.replace("HTIME_S_", "").trim()
+        : text.trim();
+      const formattedTime = formatBurmeseBookingTimeLabel(rawChosenTime);
+      const stData = currentState.data || {};
+      const boyId = String(stData.boyId || "");
+      const boyCode = boyId ? `WLDB-${boyId.substring(0, 5).toUpperCase()}` : "WLDB";
+      const typeCode = stData.typeCode || (stData.clientType === "girl" ? "G" : "L");
+      const chosenClientType = stData.clientType || (typeCode === "G" ? "girl" : "lgbt");
+      const clientTypeLabel = formatBookingClientTypeLabel(chosenClientType);
+
+      const config = await getAppConfig();
+      const packageNameFull = stData.packageName || "🕒 Section (အချိန်ပိုင်း)";
+      const packageDuration = stData.packageDuration || "သတ်မှတ်ချိန်အတိုင်း";
+      const priceNum = Number(stData.packagePrice || config.feeSec || 70000);
+      const depositPercent = Number(stData.depositPercent || config.depositPercent || 50);
+      const depositAmount = Number(
+        stData.depositAmount || Math.round((priceNum * depositPercent) / 100)
+      );
+      const remainingAmount = Math.max(0, priceNum - depositAmount);
+      const preferredDate = stData.preferredDate || formatBurmeseBookingDateLabel(getMyanmarTodayParts().todayKey);
+
+      await setDoc(
+        stateRef,
+        {
+          step: "WAIT_HIRE_SS",
+          data: {
+            ...stData,
+            preferredDate,
+            preferredTimeRaw: rawChosenTime,
+            preferredTime: formattedTime,
+          },
+        },
+        { merge: true }
+      );
+
+      const invoiceText =
+        `🧾 <b>Booking အချက်အလက် အတည်ပြုချက် (Booking Summary & Invoice)</b>\n\n` +
+        `👤 <b>Date Boy:</b> <b>${boyCode}</b>\n` +
+        `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
+        `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageNameFull)}</b>\n` +
+        `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDuration)}</b>\n` +
+        `📅 <b>ခေါ်ယူလိုသည့် နေ့ရက်:</b> <b>${escapeHTML(preferredDate)}</b>\n` +
+        `⏰ <b>ခေါ်ယူလိုသည့် အချိန်:</b> <b>${escapeHTML(formattedTime)}</b>\n` +
+        `──────────────────────\n` +
+        `💰 <b>စုစုပေါင်း ကျသင့်ငွေ:</b> <b>${formatBotKyats(priceNum)} ကျပ်</b>\n` +
+        `💳 <b>ယခုလွှဲရမည့် စရံငွေ (${depositPercent}%):</b> <b>${formatBotKyats(depositAmount)} ကျပ်</b>\n` +
+        `💵 <b>တွေ့ဆုံချိန် ကျန်ငွေ:</b> <b>${formatBotKyats(remainingAmount)} ကျပ်</b>\n\n` +
+        `🏦 <b>စရံငွေ လွှဲပေးရမည့် အကောင့်များ (နံပါတ်ကို နှိပ်၍ Copy ကူးနိုင်ပါသည်) -</b>\n` +
+        `${formatTelegramPaymentAccountsHtml(config)}\n\n` +
+        `📸 ငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပေးပါ။`;
+
+      const invoiceKeyboard = {
+        inline_keyboard: [
+          [
+            { text: "📅 နေ့ရက် ပြန်ပြင်မည်", callback_data: "HDATE_OPEN" },
+            { text: "⏰ အချိန် ပြန်ပြင်မည်", callback_data: "HTIME_OPEN" },
+          ],
+          [
+            {
+              text: "🔄 အခြား Package Menu Card ပြန်ရွေးမည်",
+              callback_data: `HIRFORCE_${typeCode}_${boyId}`,
+            },
+          ],
+        ],
+      };
+
+      await sendMessage(chatId, invoiceText, invoiceKeyboard);
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (
+      (currentState.step === "HIRE_SELECT_DATE" ||
+        currentState.step === "HIRE_SELECT_CUSTOM_DATE") &&
+      photos.length > 0
+    ) {
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ ငွေလွှဲပြေစာ မပို့မီ <b>ခေါ်ယူလိုသည့် နေ့ရက် (Preferred Date)</b> နှင့် <b>အချိန် (Preferred Time)</b> ကို အရင်ဆုံး ရွေးချယ်ပေးပါ -",
+        {
+          inline_keyboard: [
+            [{ text: "🗓️ ခေါ်ယူလိုသည့် နေ့ရက် (Date Picker) ရွေးမည်", callback_data: "HDATE_OPEN" }],
+          ],
+        }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
+    if (
+      (currentState.step === "HIRE_SELECT_TIME" ||
+        currentState.step === "HIRE_SELECT_CUSTOM_TIME") &&
+      photos.length > 0
+    ) {
+      await sendMessage(
+        chatId,
+        "⚠️ ကျေးဇူးပြု၍ ငွေလွှဲပြေစာ မပို့မီ <b>ခေါ်ယူလိုသည့် အချိန် (Preferred Time)</b> ကို အရင်ဆုံး ရွေးချယ်ပေးပါ -",
+        buildTelegramTimePickerKeyboard()
+      );
+      return res.status(200).json({ status: "success" });
     }
 
     if (currentState.step === "HIRE_SELECT_PACKAGE" && (text || photos.length > 0) && !text.startsWith("/")) {
@@ -4146,6 +4725,31 @@ export default async function handler(req, res) {
       return res.status(200).json({ status: "success" });
     }
 
+    if (currentState.step === "WAIT_HIRE_SS" && photos.length === 0 && text && !text.startsWith("/")) {
+      const stData = currentState.data || {};
+      const boyId = stData.boyId || "";
+      const typeCode = stData.typeCode || (stData.clientType === "girl" ? "G" : "L");
+      await sendMessage(
+        chatId,
+        "📸 ကျေးဇူးပြု၍ စရံငွေလွှဲပြီးပါက <b>ငွေလွှဲပြေစာ (Screenshot ဓာတ်ပုံ)</b> ကို ယခု Chat ထဲသို့ ပေးပို့ပေးပါ။\n\n<i>(နေ့ရက်၊ အချိန် သို့မဟုတ် Package ပြန်ပြင်လိုပါက အောက်ပါခလုတ်များကို နှိပ်ပါ)</i>",
+        {
+          inline_keyboard: [
+            [
+              { text: "📅 နေ့ရက် ပြန်ပြင်မည်", callback_data: "HDATE_OPEN" },
+              { text: "⏰ အချိန် ပြန်ပြင်မည်", callback_data: "HTIME_OPEN" },
+            ],
+            [
+              {
+                text: "🔄 အခြား Package Menu Card ပြန်ရွေးမည်",
+                callback_data: `HIRFORCE_${typeCode}_${boyId}`,
+              },
+            ],
+          ],
+        }
+      );
+      return res.status(200).json({ status: "success" });
+    }
+
     if (currentState.step === "WAIT_HIRE_SS" && photos.length > 0) {
       const boyId = String(currentState.data.boyId || "");
       const clientType = normalizeBookingClientType(currentState.data.clientType || "");
@@ -4159,6 +4763,12 @@ export default async function handler(req, res) {
       const packagePrice = Number(currentState.data.packagePrice || 0);
       const depositPercent = Number(currentState.data.depositPercent || 50);
       const depositAmount = Number(currentState.data.depositAmount || 0);
+      const preferredDate = String(
+        currentState.data.preferredDate || "Telegram Bot မှ ညှိနှိုင်းမည်"
+      );
+      const preferredTime = String(
+        currentState.data.preferredTime || "Telegram Bot မှ ညှိနှိုင်းမည်"
+      );
       const formattedDurationSummary =
         packagePrice > 0
           ? `${packageName}${packageDuration ? ` · ${packageDuration}` : ""} — ${formatBotKyats(packagePrice)} Ks (စရံ ${formatBotKyats(depositAmount)} Ks)`
@@ -4205,8 +4815,8 @@ export default async function handler(req, res) {
           clientProfileLink,
           depositPhotoUrl: photos[0] || "",
           depositFileId: fileIdToForward || "",
-          preferredDate: "Telegram Bot မှ ညှိနှိုင်းမည်",
-          preferredTime: "Telegram Bot",
+          preferredDate,
+          preferredTime,
           packageId,
           packageName,
           packageDuration,
@@ -4214,7 +4824,7 @@ export default async function handler(req, res) {
           depositPercent,
           depositAmount,
           duration: formattedDurationSummary,
-          notes: `Telegram Bot မှ စရံပြေစာ ပေးပို့ထားသော Dating Request (${clientTypeLabel} · ${packageName})`,
+          notes: `Telegram Bot မှ စရံပြေစာ ပေးပို့ထားသော Dating Request (${clientTypeLabel} · ${packageName} · ${preferredDate} ${preferredTime})`,
           status: "pending",
           createdAt: serverTimestamp(),
         });
@@ -4231,10 +4841,12 @@ export default async function handler(req, res) {
           `🧑‍💼 <b>သင်၏ ဧည့်သည်အမျိုးအစား:</b> <b>${escapeHTML(clientTypeLabel)}</b>\n` +
           `📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageName)}</b>\n` +
           (packageDuration ? `⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDuration)}</b>\n` : "") +
+          `📅 <b>ခေါ်ယူလိုသည့် နေ့ရက်:</b> <b>${escapeHTML(preferredDate)}</b>\n` +
+          `⏰ <b>ခေါ်ယူလိုသည့် အချိန်:</b> <b>${escapeHTML(preferredTime)}</b>\n` +
           (packagePrice > 0
             ? `💰 <b>Package ဈေးနှုန်း:</b> <b>${formatBotKyats(packagePrice)} ကျပ်</b> (စရံ <b>${formatBotKyats(depositAmount)} ကျပ်</b>)\n`
             : "") +
-          `\nAdmin မှ စစ်ဆေးအတည်ပြုပြီးသည်နှင့် သက်ဆိုင်ရာ Date Boy ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစားနှင့် Package အချက်အလက်များကို ချက်ချင်း အကြောင်းကြားပေးပါမည်။`
+          `\nAdmin မှ စစ်ဆေးအတည်ပြုပြီးသည်နှင့် သက်ဆိုင်ရာ Date Boy ထံသို့ သင်၏ ဧည့်သည်အမျိုးအစား၊ Package နှင့် ခေါ်ယူလိုသည့် နေ့ရက်/အချိန် အချက်အလက်များကို ချက်ချင်း အကြောင်းကြားပေးပါမည်။`
       );
       if (adminChatId) {
         const boyLinkLine = boyTgLink
@@ -4243,6 +4855,8 @@ export default async function handler(req, res) {
         const pkgLines =
           `\n📦 <b>ရွေးချယ်ထားသော Package:</b> <b>${escapeHTML(packageName)}</b>` +
           (packageDuration ? `\n⏱️ <b>သတ်မှတ်ကြာချိန်:</b> <b>${escapeHTML(packageDuration)}</b>` : "") +
+          `\n📅 <b>ခေါ်ယူလိုသည့် နေ့ရက်:</b> <b>${escapeHTML(preferredDate)}</b>` +
+          `\n⏰ <b>ခေါ်ယူလိုသည့် အချိန်:</b> <b>${escapeHTML(preferredTime)}</b>` +
           (packagePrice > 0
             ? `\n💰 <b>ဈေးနှုန်း / စရံ (${depositPercent}%):</b> <b>${formatBotKyats(packagePrice)} Ks</b> (စရံ <b>${formatBotKyats(depositAmount)} Ks</b>)`
             : "");
@@ -4255,7 +4869,7 @@ export default async function handler(req, res) {
           pkgLines +
           `\n🧑‍💼 <b>Client:</b> <a href="${clientProfileLink}">💬 ${escapeHTML(clientDisplayName)} (Profile နှိပ်ရန်)</a>` +
           boyLinkLine +
-          `\n\n💳 Client မှ Booking စရံပြေစာ ပို့ထားပါသည်။ Approve နှိပ်လိုက်ပါက Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>) နှင့် ရွေးချယ်ထားသော Package (<b>${escapeHTML(packageName)}</b>) တို့ကို အလိုအလျောက် အကြောင်းကြားစာ ပို့ပေးပါမည်။`;
+          `\n\n💳 Client မှ Booking စရံပြေစာ ပို့ထားပါသည်။ Approve နှိပ်လိုက်ပါက Date Boy ထံသို့ ဧည့်သည်အမျိုးအစား (<b>${escapeHTML(clientTypeShort)}</b>)၊ ရွေးချယ်ထားသော Package (<b>${escapeHTML(packageName)}</b>) နှင့် ခေါ်ယူမည့် နေ့ရက်/အချိန် (<b>${escapeHTML(preferredDate)} · ${escapeHTML(preferredTime)}</b>) တို့ကို အလိုအလျောက် အကြောင်းကြားစာ ပို့ပေးပါမည်။`;
 
         const approveCallback = bookingDocId
           ? `APP_HBK_${bookingDocId}`

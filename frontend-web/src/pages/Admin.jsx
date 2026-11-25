@@ -2905,14 +2905,22 @@ export default function Admin() {
                                   </a>
                                 </p>
                               )}
+                              <div className="pt-1 pb-1 my-1 border-y border-[#E6DFD3]/80 space-y-1">
+                                <p>
+                                  <span className="text-[#787167]">📅 ခေါ်ယူလိုသည့် နေ့ရက်:</span>{' '}
+                                  <strong className="font-mono text-[#0C0D0E]">
+                                    {bk.preferredDate || '-'}
+                                  </strong>
+                                </p>
+                                <p>
+                                  <span className="text-[#787167]">⏰ ခေါ်ယူလိုသည့် အချိန်:</span>{' '}
+                                  <strong className="font-mono text-[#0C0D0E]">
+                                    {bk.preferredTime || '-'}
+                                  </strong>
+                                </p>
+                              </div>
                               <p>
-                                <span className="text-[#787167]">Schedule:</span>{' '}
-                                <strong className="font-mono text-[#0C0D0E]">
-                                  {bk.preferredDate || '-'} · {bk.preferredTime || '-'}
-                                </strong>
-                              </p>
-                              <p>
-                                <span className="text-[#787167]">Package:</span>{' '}
+                                <span className="text-[#787167]">📦 Package:</span>{' '}
                                 <strong className="text-[#0C0D0E]">
                                   {bk.packageName || bk.duration || '-'}
                                 </strong>

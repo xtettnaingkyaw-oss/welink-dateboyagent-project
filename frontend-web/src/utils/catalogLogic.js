@@ -1214,5 +1214,353 @@ export function serializePricingConfigForFirestore(draft = {}) {
   };
 }
 
+// ==========================================
+// 📅 Telegram Bot Interactive Date & Time Picker Helpers
+// ==========================================
+
+export const BURMESE_WEEKDAYS = [
+  'တနင်္ဂနွေနေ့',
+  'တနင်္လာနေ့',
+  'အင်္ဂါနေ့',
+  'ဗုဒ္ဓဟူးနေ့',
+  'ကြာသပတေးနေ့',
+  'သောကြာနေ့',
+  'စနေနေ့',
+];
+
+export const BURMESE_MONTHS = [
+  'January (ဇန်နဝါရီ)',
+  'February (ဖေဖော်ဝါရီ)',
+  'March (မတ်)',
+  'April (ဧပြီ)',
+  'May (မေ)',
+  'June (ဇွန်)',
+  'July (ဇူလိုင်)',
+  'August (ဩဂုတ်)',
+  'September (စက်တင်ဘာ)',
+  'October (အောက်တိုဘာ)',
+  'November (နိုဝင်ဘာ)',
+  'December (ဒီဇင်ဘာ)',
+];
+
+/**
+ * Computes today's, tomorrow's, and day-after-tomorrow's YYYY-MM-DD keys in Myanmar Standard Time (UTC+06:30).
+ */
+export function getMyanmarTodayParts(nowMs = Date.now()) {
+  const MMT_OFFSET_MS = (6 * 60 + 30) * 60 * 1000;
+  const mmtNow = new Date(nowMs + MMT_OFFSET_MS);
+  const year = mmtNow.getUTCFullYear();
+  const month = mmtNow.getUTCMonth() + 1; // 1..12
+  const day = mmtNow.getUTCDate();
+
+  const toIsoKey = (y, m, d) => {
+    const dt = new Date(Date.UTC(y, m - 1, d));
+    const yy = dt.getUTCFullYear();
+    const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+    const dd = String(dt.getUTCDate()).padStart(2, '0');
+    return `${yy}-${mm}-${dd}`;
+  };
+
+  return {
+    year,
+    month,
+    day,
+    yearMonth: `${year}-${String(month).padStart(2, '0')}`,
+    todayKey: toIsoKey(year, month, day),
+    tomorrowKey: toIsoKey(year, month, day + 1),
+    dayAfterTomorrowKey: toIsoKey(year, month, day + 2),
+  };
+}
+
+/**
+ * Formats a YYYY-MM-DD date string or custom user date input into a rich Burmese + ISO label.
+ */
+export function formatBurmeseBookingDateLabel(rawDate = '', nowMs = Date.now()) {
+  const trimmed = String(rawDate || '').trim();
+  if (!trimmed) return '';
+
+  // Match YYYY-MM-DD or YYYY/MM/DD
+  let year = 0;
+  let month = 0;
+  let day = 0;
+  const isoMatch = trimmed.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})$/);
+  const dmyMatch = trimmed.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+
+  if (isoMatch) {
+    year = Number(isoMatch[1]);
+    month = Number(isoMatch[2]);
+    day = Number(isoMatch[3]);
+  } else if (dmyMatch) {
+    day = Number(dmyMatch[1]);
+    month = Number(dmyMatch[2]);
+    year = Number(dmyMatch[3]);
+  }
+
+  if (year >= 2024 && month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+    const dt = new Date(Date.UTC(year, month - 1, day));
+    if (
+      dt.getUTCFullYear() === year &&
+      dt.getUTCMonth() === month - 1 &&
+      dt.getUTCDate() === day
+    ) {
+      const isoKey = `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const weekdayMm = BURMESE_WEEKDAYS[dt.getUTCDay()] || '';
+      const { todayKey, tomorrowKey, dayAfterTomorrowKey } = getMyanmarTodayParts(nowMs);
+      let relativeSuffix = '';
+      if (isoKey === todayKey) relativeSuffix = ' · ယနေ့ (Today)';
+      else if (isoKey === tomorrowKey) relativeSuffix = ' · မနက်ဖြန် (Tomorrow)';
+      else if (isoKey === dayAfterTomorrowKey) relativeSuffix = ' · သန်ဘက်ခါ';
+      return `${isoKey} (${weekdayMm}${relativeSuffix})`;
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * Formats a time slot or custom time input into a descriptive Burmese time-of-day label.
+ */
+export function formatBurmeseBookingTimeLabel(rawTime = '') {
+  const trimmed = String(rawTime || '').trim();
+  if (!trimmed) return '';
+  if (/ASAP|အမြန်ဆုံး|ချက်ချင်း/i.test(trimmed)) {
+    return '⚡ အမြန်ဆုံး / ချက်ချင်း (ASAP)';
+  }
+
+  const amPmMatch = trimmed.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+  if (amPmMatch) {
+    const hr12 = Number(amPmMatch[1]);
+    const min = amPmMatch[2];
+    const period = amPmMatch[3].toUpperCase();
+    const hr24 = period === 'PM' ? (hr12 === 12 ? 12 : hr12 + 12) : hr12 === 12 ? 0 : hr12;
+    const padded12 = `${String(hr12).padStart(2, '0')}:${min} ${period}`;
+
+    let periodMm = 'ညပိုင်း';
+    if (hr24 >= 5 && hr24 < 12) periodMm = 'နံနက်ပိုင်း';
+    else if (hr24 >= 12 && hr24 < 16) periodMm = 'နေ့လယ်ပိုင်း';
+    else if (hr24 >= 16 && hr24 < 19) periodMm = 'ညနေပိုင်း';
+
+    return `${padded12} (${periodMm})`;
+  }
+
+  const h24Match = trimmed.match(/^(\d{1,2}):(\d{2})$/);
+  if (h24Match) {
+    const hr24 = Number(h24Match[1]);
+    const min = h24Match[2];
+    if (hr24 >= 0 && hr24 <= 23) {
+      const period = hr24 >= 12 ? 'PM' : 'AM';
+      const hr12 = hr24 % 12 || 12;
+      return formatBurmeseBookingTimeLabel(`${String(hr12).padStart(2, '0')}:${min} ${period}`);
+    }
+  }
+
+  return trimmed;
+}
+
+/**
+ * Builds an interactive Telegram Inline Calendar Date Picker keyboard with:
+ * - Quick Today / Tomorrow / Day-After-Tomorrow buttons
+ * - Month navigation (Prev / Next Month)
+ * - 7-column calendar day grid (disabling past dates)
+ * - Custom date input & Back to Package Menu Cards button
+ */
+export function buildTelegramDatePickerKeyboard(
+  targetYearMonth = '',
+  nowMs = Date.now(),
+  backCallbackData = ''
+) {
+  const { year: curYear, month: curMonth, todayKey, tomorrowKey, dayAfterTomorrowKey } =
+    getMyanmarTodayParts(nowMs);
+
+  let viewYear = curYear;
+  let viewMonth = curMonth; // 1..12
+  const ymMatch = String(targetYearMonth || '').match(/^(\d{4})-(\d{1,2})$/);
+  if (ymMatch) {
+    const y = Number(ymMatch[1]);
+    const m = Number(ymMatch[2]);
+    if (y >= 2024 && y <= 2035 && m >= 1 && m <= 12) {
+      viewYear = y;
+      viewMonth = m;
+    }
+  }
+
+  const prevDate = new Date(Date.UTC(viewYear, viewMonth - 2, 1));
+  const nextDate = new Date(Date.UTC(viewYear, viewMonth, 1));
+  const prevYm = `${prevDate.getUTCFullYear()}-${String(prevDate.getUTCMonth() + 1).padStart(2, '0')}`;
+  const nextYm = `${nextDate.getUTCFullYear()}-${String(nextDate.getUTCMonth() + 1).padStart(2, '0')}`;
+  const canGoPrev =
+    viewYear > curYear || (viewYear === curYear && viewMonth > curMonth);
+
+  const monthTitle = `${BURMESE_MONTHS[viewMonth - 1]} ${viewYear}`;
+  const firstDayOfWeek = new Date(Date.UTC(viewYear, viewMonth - 1, 1)).getUTCDay(); // 0 (Sun) .. 6 (Sat)
+  const daysInMonth = new Date(Date.UTC(viewYear, viewMonth, 0)).getUTCDate();
+
+  const rows = [];
+
+  // 1. Quick Select Buttons (Today, Tomorrow, Day After Tomorrow)
+  rows.push([
+    {
+      text: `📌 ယနေ့ (${todayKey})`,
+      callback_data: `HDATE_S_${todayKey}`,
+    },
+    {
+      text: `🌤️ မနက်ဖြန် (${tomorrowKey})`,
+      callback_data: `HDATE_S_${tomorrowKey}`,
+    },
+  ]);
+  rows.push([
+    {
+      text: `📅 သန်ဘက်ခါ (${dayAfterTomorrowKey})`,
+      callback_data: `HDATE_S_${dayAfterTomorrowKey}`,
+    },
+  ]);
+
+  // 2. Month Navigation Header Row
+  rows.push([
+    {
+      text: canGoPrev ? '◀️ ယခင်လ' : '·',
+      callback_data: canGoPrev ? `HDATE_M_${prevYm}` : 'HDATE_NOP',
+    },
+    {
+      text: `🗓️ ${monthTitle}`,
+      callback_data: 'HDATE_NOP',
+    },
+    {
+      text: 'နောက်လ ▶️',
+      callback_data: `HDATE_M_${nextYm}`,
+    },
+  ]);
+
+  // 3. Weekday Header Row
+  rows.push(
+    ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'].map((wd) => ({
+      text: wd,
+      callback_data: 'HDATE_NOP',
+    }))
+  );
+
+  // 4. Calendar Grid Cells (7 columns per week row)
+  let currentWeek = [];
+  for (let i = 0; i < firstDayOfWeek; i++) {
+    currentWeek.push({ text: ' ', callback_data: 'HDATE_NOP' });
+  }
+
+  for (let d = 1; d <= daysInMonth; d++) {
+    const isoDate = `${viewYear}-${String(viewMonth).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+    if (isoDate < todayKey) {
+      currentWeek.push({
+        text: '·',
+        callback_data: 'HDATE_PAST',
+      });
+    } else if (isoDate === todayKey) {
+      currentWeek.push({
+        text: `[${d}]`,
+        callback_data: `HDATE_S_${isoDate}`,
+      });
+    } else {
+      currentWeek.push({
+        text: String(d),
+        callback_data: `HDATE_S_${isoDate}`,
+      });
+    }
+
+    if (currentWeek.length === 7) {
+      rows.push(currentWeek);
+      currentWeek = [];
+    }
+  }
+
+  if (currentWeek.length > 0) {
+    while (currentWeek.length < 7) {
+      currentWeek.push({ text: ' ', callback_data: 'HDATE_NOP' });
+    }
+    rows.push(currentWeek);
+  }
+
+  // 5. Custom Date & Back Navigation Row
+  rows.push([
+    {
+      text: '✍️ အခြားရက်စွဲ ကိုယ်တိုင်ရိုက်ထည့်မည်',
+      callback_data: 'HDATE_CUSTOM',
+    },
+  ]);
+
+  if (backCallbackData) {
+    rows.push([
+      {
+        text: '⬅️ Package Menu Card ပြန်ရွေးမည်',
+        callback_data: backCallbackData,
+      },
+    ]);
+  }
+
+  return {
+    year: viewYear,
+    month: viewMonth,
+    monthTitle,
+    todayKey,
+    tomorrowKey,
+    inline_keyboard: rows,
+  };
+}
+
+/**
+ * Builds an interactive Telegram Inline Time Picker keyboard organized by time of day.
+ */
+export function buildTelegramTimePickerKeyboard() {
+  const rows = [
+    // Morning (နံနက်ပိုင်း)
+    [
+      { text: '🌅 09:00 AM', callback_data: 'HTIME_S_09:00 AM' },
+      { text: '🌅 10:00 AM', callback_data: 'HTIME_S_10:00 AM' },
+      { text: '🌅 11:00 AM', callback_data: 'HTIME_S_11:00 AM' },
+    ],
+    // Afternoon (နေ့လယ် / ညနေပိုင်း)
+    [
+      { text: '☀️ 12:00 PM', callback_data: 'HTIME_S_12:00 PM' },
+      { text: '☀️ 01:00 PM', callback_data: 'HTIME_S_01:00 PM' },
+      { text: '☀️ 02:00 PM', callback_data: 'HTIME_S_02:00 PM' },
+    ],
+    [
+      { text: '🌤️ 03:00 PM', callback_data: 'HTIME_S_03:00 PM' },
+      { text: '🌤️ 04:00 PM', callback_data: 'HTIME_S_04:00 PM' },
+      { text: '🌤️ 05:00 PM', callback_data: 'HTIME_S_05:00 PM' },
+    ],
+    // Evening & Night (ညနေ / ညပိုင်း)
+    [
+      { text: '🌆 06:00 PM', callback_data: 'HTIME_S_06:00 PM' },
+      { text: '🌆 07:00 PM', callback_data: 'HTIME_S_07:00 PM' },
+      { text: '🌙 08:00 PM', callback_data: 'HTIME_S_08:00 PM' },
+    ],
+    [
+      { text: '🌙 09:00 PM', callback_data: 'HTIME_S_09:00 PM' },
+      { text: '🌙 10:00 PM', callback_data: 'HTIME_S_10:00 PM' },
+      { text: '🌙 11:00 PM', callback_data: 'HTIME_S_11:00 PM' },
+    ],
+    // Immediate & Custom Time
+    [
+      {
+        text: '⚡ အမြန်ဆုံး / ချက်ချင်း (ASAP)',
+        callback_data: 'HTIME_S_ASAP',
+      },
+    ],
+    [
+      {
+        text: '✍️ အခြားအချိန် စာရိုက်ထည့်မည် (ဥပမာ - 7:30 PM)',
+        callback_data: 'HTIME_CUSTOM',
+      },
+    ],
+    [
+      {
+        text: '⬅️ ခေါ်ယူမည့် နေ့ရက် (Date) ပြန်ရွေးမည်',
+        callback_data: 'HDATE_OPEN',
+      },
+    ],
+  ];
+
+  return { inline_keyboard: rows };
+}
+
+
 
 

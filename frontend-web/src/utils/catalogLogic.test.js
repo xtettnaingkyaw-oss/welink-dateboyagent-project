@@ -31,6 +31,11 @@ import {
   formatPaymentAccountsToInfoString,
   normalizePricingConfig,
   serializePricingConfigForFirestore,
+  getMyanmarTodayParts,
+  formatBurmeseBookingDateLabel,
+  formatBurmeseBookingTimeLabel,
+  buildTelegramDatePickerKeyboard,
+  buildTelegramTimePickerKeyboard,
 } from './catalogLogic.js';
 
 test('resolveMediaUrl converts Telegram file_ids and legacy api.telegram.org URLs into safe proxy URLs', () => {
@@ -593,6 +598,68 @@ test('Pricing Config, Package Menu Cards (Duration, Price, Deposit), and Payment
   assert.equal(fallbackAccounts.length, 1);
   assert.equal(fallbackAccounts[0].accountNumber, '09123456789');
 });
+
+test('Telegram Bot Date Picker & Time Picker generate calendar grids, Burmese weekday labels, and time slots accurately', () => {
+  // Nov 25, 2026 06:00 AM MMT = Nov 24, 2026 23:30 UTC
+  const sampleNowUtcMs = Date.UTC(2026, 10, 24, 23, 30, 0);
+  const parts = getMyanmarTodayParts(sampleNowUtcMs);
+  assert.equal(parts.todayKey, '2026-11-25');
+  assert.equal(parts.tomorrowKey, '2026-11-26');
+  assert.equal(parts.dayAfterTomorrowKey, '2026-11-27');
+
+  // Date formatting with Burmese weekday & relative day badges
+  assert.equal(
+    formatBurmeseBookingDateLabel('2026-11-25', sampleNowUtcMs),
+    '2026-11-25 (ဗုဒ္ဓဟူးနေ့ · ယနေ့ (Today))'
+  );
+  assert.equal(
+    formatBurmeseBookingDateLabel('26/11/2026', sampleNowUtcMs),
+    '2026-11-26 (ကြာသပတေးနေ့ · မနက်ဖြန် (Tomorrow))'
+  );
+  assert.equal(
+    formatBurmeseBookingDateLabel('2026-12-05', sampleNowUtcMs),
+    '2026-12-05 (စနေနေ့)'
+  );
+
+  // Time formatting with Burmese period of day
+  assert.equal(formatBurmeseBookingTimeLabel('09:00 AM'), '09:00 AM (နံနက်ပိုင်း)');
+  assert.equal(formatBurmeseBookingTimeLabel('02:00 PM'), '02:00 PM (နေ့လယ်ပိုင်း)');
+  assert.equal(formatBurmeseBookingTimeLabel('06:00 PM'), '06:00 PM (ညနေပိုင်း)');
+  assert.equal(formatBurmeseBookingTimeLabel('08:00 PM'), '08:00 PM (ညပိုင်း)');
+  assert.equal(formatBurmeseBookingTimeLabel('20:30'), '08:30 PM (ညပိုင်း)');
+  assert.equal(formatBurmeseBookingTimeLabel('ASAP'), '⚡ အမြန်ဆုံး / ချက်ချင်း (ASAP)');
+
+  // Calendar Date Picker keyboard structure
+  const datePicker = buildTelegramDatePickerKeyboard(
+    '2026-11',
+    sampleNowUtcMs,
+    'HIRFORCE_L_boy123'
+  );
+  assert.equal(datePicker.year, 2026);
+  assert.equal(datePicker.month, 11);
+  const flatDateCallbacks = datePicker.inline_keyboard
+    .flat()
+    .map((btn) => btn.callback_data);
+  assert.ok(flatDateCallbacks.includes('HDATE_S_2026-11-25'));
+  assert.ok(flatDateCallbacks.includes('HDATE_S_2026-11-26'));
+  assert.ok(flatDateCallbacks.includes('HDATE_M_2026-12'));
+  assert.ok(flatDateCallbacks.includes('HDATE_PAST'));
+  assert.ok(flatDateCallbacks.includes('HDATE_CUSTOM'));
+  assert.ok(flatDateCallbacks.includes('HIRFORCE_L_boy123'));
+
+  // Time Picker keyboard structure
+  const timePicker = buildTelegramTimePickerKeyboard();
+  const flatTimeCallbacks = timePicker.inline_keyboard
+    .flat()
+    .map((btn) => btn.callback_data);
+  assert.ok(flatTimeCallbacks.includes('HTIME_S_09:00 AM'));
+  assert.ok(flatTimeCallbacks.includes('HTIME_S_02:00 PM'));
+  assert.ok(flatTimeCallbacks.includes('HTIME_S_08:00 PM'));
+  assert.ok(flatTimeCallbacks.includes('HTIME_S_ASAP'));
+  assert.ok(flatTimeCallbacks.includes('HTIME_CUSTOM'));
+  assert.ok(flatTimeCallbacks.includes('HDATE_OPEN'));
+});
+
 
 
 

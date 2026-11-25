@@ -863,13 +863,13 @@ export default function AdminPricingManager({
             <div className="p-5 rounded-xl bg-slate-900 border border-slate-800 space-y-3 text-xs">
               <div className="flex items-center justify-between text-[11px] font-mono text-emerald-400">
                 <span>
-                  STEP 2 PREVIEW — ဧည့်သည်မှ &quot;{selectedPreviewPkg.title}&quot; Card ကို နှိပ်လိုက်သည့်အခါ ပေါ်လာမည့် ငွေလွှဲရန် အချက်အလက်
+                  STEP 2 &amp; 3 PREVIEW — ဧည့်သည်မှ &quot;{selectedPreviewPkg.title}&quot; Card ကို ရွေးပြီး Calendar Date Picker &amp; Time Picker ဖြင့် နေ့ရက်/အချိန် ရွေးချယ်ပြီးချိန် ပေါ်လာမည့် ငွေလွှဲ Invoice
                 </span>
               </div>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                 <div className="space-y-1.5 text-slate-200 leading-relaxed">
                   <p className="font-semibold text-white">
-                    🧾 ရွေးချယ်ထားသော Package အတည်ပြုချက်
+                    🧾 Booking အချက်အလက် အတည်ပြုချက် (Booking Summary &amp; Invoice)
                   </p>
                   <p>
                     📦 <strong>Package:</strong> {selectedPreviewPkg.icon}{' '}
@@ -877,6 +877,12 @@ export default function AdminPricingManager({
                   </p>
                   <p>
                     ⏱️ <strong>သတ်မှတ်ကြာချိန်:</strong> {selectedPreviewPkg.duration}
+                  </p>
+                  <p className="text-amber-300">
+                    📅 <strong>ခေါ်ယူလိုသည့် နေ့ရက် (Date Picker):</strong> ယနေ့ / မနက်ဖြန် / ရွေးချယ်ထားသော ရက်စွဲ
+                  </p>
+                  <p className="text-amber-300">
+                    ⏰ <strong>ခေါ်ယူလိုသည့် အချိန် (Time Picker):</strong> 08:00 PM (ညပိုင်း)
                   </p>
                   <p className="font-mono tabular-nums">
                     💰 <strong>စုစုပေါင်း ကျသင့်ငွေ:</strong>{' '}
